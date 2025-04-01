@@ -7,6 +7,10 @@ Agent Framework plugin for services from Volcengine(火山引擎). Currently sup
 pip install livekit-plugins-volcengine
 ```
 
+## Pre-requisites
+
+- Volcengine TTS environment variable: `VOLCENGINE_TTS_ACCESS_TOKEN`
+
 ## Usage
 
 ```python
@@ -31,6 +35,10 @@ async def entry_point(ctx: JobContext):
     
     await session.start(agent=agent, room=ctx.room)
     
-    await session.generate_reply(instructions="向用户问好", allow_interruptions=False)
+    await session.generate_reply()
+
+if __name__ == "__main__":
+    load_dotenv()
+    cli.run_app(WorkerOptions(entrypoint_fnc=entry_point))
 ```
 
