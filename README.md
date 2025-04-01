@@ -24,7 +24,8 @@ async def entry_point(ctx: JobContext):
     session = AgentSession(
         vad=silero.VAD.load(),
         stt=deepgram.STT(language="zh"),
-        tts=volcengine.TTS(app_id="1499105122", cluster="volcano_tts", streaming=True),
+        ## app_id and cluster can be found in the Volcengine TTS console
+        tts=volcengine.TTS(app_id="xxx", cluster="xxx", streaming=True),
         llm=openai.LLM(model="gpt-4o-mini"),
     )
     
