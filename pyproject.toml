@@ -1,17 +1,55 @@
 [project]
 name = "livekit-plugins-volcengine"
-version = "0.1.0"
-description = "LiveKit Volcengine Plugins"
+dynamic = ["version"]
+description = "LiveKit Agent Plugins for Volcengine"
 readme = "README.md"
 authors = [
     { name = "wangmengdi", email = "790990241@qq.com" }
 ]
+keywords = ["webrtc", "realtime", "audio", "video", "livekit"]
 requires-python = ">=3.9"
 dependencies = [
-    "livekit-agents~=1.0rc0",
+    "livekit-agents~=1.0.0rc4",
+    "pydantic>=2.0",
+    "python-dotenv>=1.1.0",
 ]
+
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "livekit-plugins-cartesia>=1.0.0rc4",
+    "livekit-plugins-openai>=1.0.0rc4",
+    "livekit-plugins-deepgram>=1.0.0rc4",
+    "livekit-plugins-silero>=1.0.0rc4",
+]
+
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "livekit/plugins/volcengine/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["livekit"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/livekit"]
