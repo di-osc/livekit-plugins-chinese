@@ -19,6 +19,8 @@ from pydantic import BaseModel, Field
 import aiohttp
 import asyncio
 
+from .log import logger
+
 
 class _TTSOptions(BaseModel):
     app_id: str
@@ -306,10 +308,9 @@ class SynthesizeStream(tts.SynthesizeStream):
             while True:
                 try:
                     res = await ws.receive_bytes()
-                except APIConnectionError:
-                    continue
-                if res is None:
-                    continue
+                except Exception as e:
+                    logger.warning(f"Error while receiving bytes: {e}")
+                    break
                 done, data = parse_response(res)
                 if data is not None:
                     frames = bstream.write(data)
@@ -329,13 +330,15 @@ class SynthesizeStream(tts.SynthesizeStream):
             for sentence in sentences:
                 if len(sentence) == 0:
                     continue
-                async with self._pool.connection() as ws:
-                    tasks = [
-                        asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
-                        asyncio.create_task(_recv_task(ws=ws)),
-                    ]
-                    await asyncio.gather(*tasks)
-                    await utils.aio.gracefully_cancel(*tasks)
+                ws: aiohttp.ClientWebSocketResponse = await self._tts._connect_ws()
+                assert not ws.closed, "WebSocket connection is closed"
+                tasks = [
+                    asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
+                    asyncio.create_task(_recv_task(ws=ws)),
+                ]
+                await asyncio.gather(*tasks)
+                await utils.aio.gracefully_cancel(*tasks)
+                await self._tts._close_ws(ws)
 
 
 def parse_response(res) -> Tuple[bool, ByteString | None]:
