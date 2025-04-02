@@ -177,3 +177,5 @@ cython_debug/
 test.py
 
 .python-version
+
+*.ipynb

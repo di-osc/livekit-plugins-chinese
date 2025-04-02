@@ -966,6 +966,7 @@ dependencies = [
     { name = "livekit-agents" },
     { name = "livekit-api" },
     { name = "livekit-protocol" },
+    { name = "openai" },
     { name = "pydantic" },
     { name = "python-dotenv" },
 ]
@@ -984,6 +985,7 @@ requires-dist = [
     { name = "livekit-agents", specifier = "~=1.0.0rc4" },
     { name = "livekit-api", specifier = "==0.8.2" },
     { name = "livekit-protocol", specifier = "==0.9.2" },
+    { name = "openai", specifier = ">=1.70.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
 ]
