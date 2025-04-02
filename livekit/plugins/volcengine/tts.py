@@ -298,12 +298,18 @@ class SynthesizeStream(tts.SynthesizeStream):
         )
 
         async def _send_task(sentence: str, ws: aiohttp.ClientWebSocketResponse):
-            data = self._opts.get_ws_query_params(text=sentence)
-            await ws.send_bytes(data)
+            if len(sentence) > 0:
+                data = self._opts.get_ws_query_params(text=sentence)
+                await ws.send_bytes(data)
 
         async def _recv_task(ws: aiohttp.ClientWebSocketResponse):
             while True:
-                res = await ws.receive_bytes()
+                try:
+                    res = await ws.receive_bytes()
+                except APIConnectionError:
+                    continue
+                if res is None:
+                    continue
                 done, data = parse_response(res)
                 if data is not None:
                     frames = bstream.write(data)
@@ -324,10 +330,12 @@ class SynthesizeStream(tts.SynthesizeStream):
                 if len(sentence) == 0:
                     continue
                 async with self._pool.connection() as ws:
-                    await asyncio.gather(
-                        _send_task(sentence, ws),
-                        _recv_task(ws),
-                    )
+                    tasks = [
+                        asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
+                        asyncio.create_task(_recv_task(ws=ws)),
+                    ]
+                    await asyncio.gather(*tasks)
+                    await utils.aio.gracefully_cancel(*tasks)
 
 
 def parse_response(res) -> Tuple[bool, ByteString | None]:
