@@ -1,6 +1,6 @@
 # LiveKit Plugins Volcengine
 
-Agent Framework plugin for services from Volcengine(火山引擎). Currently supports [TTS](https://www.volcengine.com/docs/6561/79817)
+Agent Framework plugin for services from Volcengine(火山引擎). Currently supports [TTS](https://www.volcengine.com/docs/6561/79817), [LLM](https://www.volcengine.com/docs/82379/1298454#%E6%B5%81%E5%BC%8F%E8%B0%83%E7%94%A8)
 
 ## Installation
 ```python
