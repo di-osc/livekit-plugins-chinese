@@ -10,12 +10,13 @@ pip install livekit-plugins-volcengine
 ## Pre-requisites
 
 - Volcengine TTS environment variable: `VOLCENGINE_TTS_ACCESS_TOKEN`
+- Volcengine LLM environment variable: `VOLCENGINE_LLM_API_KEY`
 
 ## Usage
 
 ```python
 from livekit.agents import Agent, AgentSession, JobContext, cli, WorkerOptions
-from livekit.plugins import openai, volcengine, deepgram, silero
+from livekit.plugins import volcengine, deepgram, silero
 from dotenv import load_dotenv
 
 
@@ -28,9 +29,10 @@ async def entry_point(ctx: JobContext):
     session = AgentSession(
         vad=silero.VAD.load(),
         stt=deepgram.STT(language="zh"),
-        ## app_id and cluster can be found in the Volcengine TTS console, and you can find voice type at https://www.volcengine.com/docs/6561/97465
+        # app_id and cluster can be found in the Volcengine TTS console, and you can find voice type at https://www.volcengine.com/docs/6561/97465
         tts=volcengine.TTS(app_id="xxx", cluster="xxx", streaming=True, vioce_type="BV001_V2_streaming"),
-        llm=openai.LLM(model="gpt-4o-mini"),
+        # model can be endpoint id or model id, you can find it at https://www.volcengine.com/docs/82379/1513689
+        llm=volcengine.LLM(model="doubao-1-5-lite-32k-250115"),
     )
     
     await session.start(agent=agent, room=ctx.room)
