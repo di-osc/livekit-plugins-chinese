@@ -31,7 +31,7 @@ async def entry_point(ctx: JobContext):
     agent = Agent(instructions="You are a helpful assistant.")
 
     session = AgentSession(
-        # pip install livekit-plugins-silero
+        # pip install livekit-plugins-silero>=1.0.0rc9
         vad=silero.VAD.load(),
         # app_id and cluster can be found in the Volcengine STT console. https://console.volcengine.com/speech/service/16
         stt=volcengine.STT(app_id="xxx", cluster="xxx"),
