@@ -1,8 +1,9 @@
 from .tts import TTS
 from .llm import LLM
+from .stt import STT
 from .version import __version__
 
-__all__ = ["TTS", "LLM", "__version__"]
+__all__ = ["TTS", "LLM", "STT", "__version__"]
 
 from livekit.agents import Plugin
 
