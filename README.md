@@ -31,8 +31,9 @@ async def entry_point(ctx: JobContext):
     agent = Agent(instructions="You are a helpful assistant.")
 
     session = AgentSession(
+        # pip install livekit-plugins-silero
         vad=silero.VAD.load(),
-        # app_id and cluster can be found in the Volcengine STT console. https://console.volcengine.com/speech/service/16?AppID=5909198413
+        # app_id and cluster can be found in the Volcengine STT console. https://console.volcengine.com/speech/service/16
         stt=volcengine.STT(app_id="xxx", cluster="xxx"),
         # app_id and cluster can be found in the Volcengine TTS console, and you can find voice type at https://www.volcengine.com/docs/6561/97465
         tts=volcengine.TTS(app_id="xxx", cluster="xxx", vioce_type="BV001_V2_streaming"),
