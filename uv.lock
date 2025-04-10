@@ -831,7 +831,7 @@ wheels = [
 
 [[package]]
 name = "livekit"
-version = "1.0.2"
+version = "1.0.5"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -840,18 +840,18 @@ dependencies = [
     { name = "protobuf" },
     { name = "types-protobuf" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/24/4b/50b6bc1f7ecfc9e9c0a9eff9db8a5571bc1fdabbfac5115e39c3f4477cd9/livekit-1.0.2.tar.gz", hash = "sha256:45a3f319c27671df190ffee339132bb3e7f2d65a75a441804ed6b4bbfe616481", size = 300274 }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/7b/2a/372ae50dbe988f98924625afbae59855cca4127da2e4cfe49b90fe6f783e/livekit-1.0.5.tar.gz", hash = "sha256:67e671185c5bcb38decb8b8affe41add4986479603a3f06f2d6a9a030bd9c4f8", size = 309403 }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/52/e8/6af1bea9404fe8df4cd36de9aec7e2438f5a8fa97665c79312f83bdabb0b/livekit-1.0.2-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:6dcb64fb7ac9cc7735d8a3b4c175b4e188820de01dd8008adc81289b680f13a6", size = 10616843 },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/88/df/2c08af7731badde50c9a99f9f114fa159358689603675ae0d036994aaf44/livekit-1.0.2-py3-none-macosx_11_0_arm64.whl", hash = "sha256:aa18bf097cd5283d4f16c248c1f291a3dbabbe92c40399f0f3c99e30603a2948", size = 9296117 },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/3c/53/47c96a597a614ac8da19c4e1ecd735fbda63a311043c9cea542a8e3971cd/livekit-1.0.2-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:34418c08b4834bc07388d6789af1e533837f703f3e412b1159a4bd2d799755ba", size = 10351478 },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/6e/57/4706368c38cb1d9184d82a42ed6d6c581a8a885c936b9e067123b45b9030/livekit-1.0.2-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:82de6b02cc28c59461bbae5f3be7f0a8f7a0178dfa4115ef5d913960b92461fb", size = 11851259 },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ff/9b/3e57710808e953fc4251f8eef9c8f5fee8fb387de2719e5dda929976c650/livekit-1.0.2-py3-none-win_amd64.whl", hash = "sha256:827c23964910779ee888cdf3a501590d7822c6cfff8e359502a7d301c05c5c13", size = 11197987 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/8d/fc/4fc557e92de53e4f764e674854eeac87c25bcb93299863856159f298d75f/livekit-1.0.5-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:47f54767e55b68070905360b68be63637b064b114908da7f1089884287ff7d1c", size = 10773334 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/eb/6f/6f4e0465481664718570d25093742ffc8e784e3049d190ef91a9c0eebeca/livekit-1.0.5-py3-none-macosx_11_0_arm64.whl", hash = "sha256:fb646af9fe8e9707c8607ba20251ae0b23dc8e038a5a5c489371b337ca69c3a4", size = 9449306 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/43/ab/23297367382ed9a121972d48a4e660848bfd64ec4fc07c80f050b784043b/livekit-1.0.5-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:4a8f6847b35bcb40535a458cf85aa76b407baec1d347f1926eaebac20e8338bb", size = 10532217 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/8b/42/7a8ced7b2300664e77d88e66f02ecf44391caebe088bc2df0e00012cf5b6/livekit-1.0.5-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:9625d99f9a3463cda49f2290fce828942bffde55ce77e2d19073236d62705a98", size = 12048069 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/1b/38/bd07568b414678873d16ccbaa7acd28ba62f35d697cb73da366d33367bab/livekit-1.0.5-py3-none-win_amd64.whl", hash = "sha256:f014af5ab3565bc1cca4d009f3ba078cfe56c88276a5be12436b42e424811892", size = 11377761 },
 ]
 
 [[package]]
 name = "livekit-agents"
-version = "1.0.0rc9"
+version = "1.0.11"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -875,9 +875,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/b9/9d/681907463b11e939a470cc679720536ea8d00e2d38d2d49dcd7c7347d19d/livekit_agents-1.0.0rc9.tar.gz", hash = "sha256:8c6894a0eb42d9708b23ad65bb2d90f74f150ec47e2af20e2c615390621f54e6", size = 840826 }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e2/03/9aa2eaacb83b49d0c4e84330ce1c9b9d1411f57eca2427f4d53ef41666e4/livekit_agents-1.0.11.tar.gz", hash = "sha256:097a5572bb2ce30234482b4a63664e4b85f574285c88b2aaa48badee98c826c2", size = 843453 }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/78/d3/dc749cf2dc07fad1477f876598ccd0285b918cf6275411bb7fd90352abae/livekit_agents-1.0.0rc9-py3-none-any.whl", hash = "sha256:0d034328756351ff68b09ebd58ed35ea4917ed8d0522492457342363a4f2e501", size = 892093 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/dc/1c/ea50ca3b3299e6d29fafcdec29630e0d5504103bbd4b3e5a2334b27b83bb/livekit_agents-1.0.11-py3-none-any.whl", hash = "sha256:07c0a2bfb26f37df32e294d277eded77139039de6c610609b52c57fdc74e9a5b", size = 895043 },
 ]
 
 [package.optional-dependencies]
@@ -908,46 +908,46 @@ wheels = [
 
 [[package]]
 name = "livekit-plugins-cartesia"
-version = "1.0.0rc9"
+version = "1.0.11"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "livekit-agents" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/26/ee/00b88e7f4507a9a6ad12270303f6c60355c9fcfbd353e1f95b9011097ba6/livekit_plugins_cartesia-1.0.0rc9.tar.gz", hash = "sha256:29f77a55f98a92488cc6fab8b260e940c0320c63ee599d6ebfe0b2aecb02b35f", size = 7121 }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/64/bf/9ebb3c5d0518ded3d88b8a685aade6ba12043cb58f77196de5b383261896/livekit_plugins_cartesia-1.0.11.tar.gz", hash = "sha256:2562135dd3cbafe77db5a418e55d51efdadd5860ec04a4bc36a16ec0c611f56c", size = 7128 }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d8/a5/119f3b1d65cf586fac53adf8d5c5cc960b4d531bb0c9b0fd1c6a524954de/livekit_plugins_cartesia-1.0.0rc9-py3-none-any.whl", hash = "sha256:0c2975b831e1c00d3b887f72cf878c7f9096f5f0cc46588a0ba5432429441f2d", size = 7878 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/97/10/83cf5ba6e4abf9e08a24e90ab631c7f0c91dc1f5d899806661adef77bff3/livekit_plugins_cartesia-1.0.11-py3-none-any.whl", hash = "sha256:2e4bf024937ce095be39fe3ccaa9eaf46310f9fa2c63b7f2ee53bd204c513195", size = 7861 },
 ]
 
 [[package]]
 name = "livekit-plugins-deepgram"
-version = "1.0.0rc9"
+version = "1.0.11"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "livekit-agents", extra = ["codecs"] },
     { name = "numpy", version = "2.0.2", source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }, marker = "python_full_version < '3.10'" },
     { name = "numpy", version = "2.2.4", source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }, marker = "python_full_version >= '3.10'" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/2e/29/dc7407b8de826cd7bb6df3cbf750dbcb8f969d96f300d4f43dab0be4d0b3/livekit_plugins_deepgram-1.0.0rc9.tar.gz", hash = "sha256:4db7c92e581dde95980d7d2bb01385475fa18dec521968674d95923e60e0c4ce", size = 13971 }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/5d/81/ab52afa7c65f5ed173848536648e45930adebbeb9ba18641111c5b00a3e2/livekit_plugins_deepgram-1.0.11.tar.gz", hash = "sha256:727f4069e3c275ffd4e699c7081647a9581395f1acbe336f7a8cf7aa471631c1", size = 13984 }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ba/1f/898e15a8a3222ba3ac85ab71bf2915a8b40aaee7c8a77e02eb17c25f3ce9/livekit_plugins_deepgram-1.0.0rc9-py3-none-any.whl", hash = "sha256:2980fbd4a4beda0e49c6331323990a3da46fbaef18f0b0ddc9740c1927e5c310", size = 15974 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/a2/df/f382611aada24a4d5f408e135ce7eba52b1f84b38cfe33a77964c287b125/livekit_plugins_deepgram-1.0.11-py3-none-any.whl", hash = "sha256:d0bc1bf9f264f8362ac85747073720c15ca68366116b92d54d251e2dfb57d913", size = 15985 },
 ]
 
 [[package]]
 name = "livekit-plugins-openai"
-version = "1.0.0rc9"
+version = "1.0.11"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "livekit-agents", extra = ["codecs", "images"] },
     { name = "openai", extra = ["realtime"] },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d8/15/8ddb57f747940a5603c298d4f64b85accaf6337a27627b665704420d82b6/livekit_plugins_openai-1.0.0rc9.tar.gz", hash = "sha256:87cce430fda6b1aa2675ae984c224914c86455366d9902cc21d367e37ce6a80c", size = 23262 }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/34/24/6fbc1b284e1e3e61a8d1de6e9d545ca4299c6bdcb07b32fd181f4b1e1e87/livekit_plugins_openai-1.0.11.tar.gz", hash = "sha256:c659619019423c07f16aa59317a7445ba046c66081de913c29f155f93f9976f4", size = 23310 }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ea/05/71a23e185dc8a5fca7fe682db507510aece8ca3d26c7903836fe5213f30f/livekit_plugins_openai-1.0.0rc9-py3-none-any.whl", hash = "sha256:3a3d5a97732f465b729170fb96dfac4d6ae22c8f613a83badb08657ba309b36b", size = 28125 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/59/67/11fe4c42d54d4b5ac479823316ee3436309ea4c7bcd8a2ee33907772d1c6/livekit_plugins_openai-1.0.11-py3-none-any.whl", hash = "sha256:43d3941a29942a5876bee59ea0a5ea5c795bc82069e9e949c8cb940421929a03", size = 28192 },
 ]
 
 [[package]]
 name = "livekit-plugins-silero"
-version = "1.0.0rc9"
+version = "1.0.11"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "livekit-agents" },
@@ -956,9 +956,9 @@ dependencies = [
     { name = "onnxruntime", version = "1.20.1", source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }, marker = "python_full_version < '3.10'" },
     { name = "onnxruntime", version = "1.21.0", source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }, marker = "python_full_version >= '3.10'" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/82/98/74898ba33dd20f8a2c95adc01c084afac7341380ae2b9817325d8c8d87af/livekit_plugins_silero-1.0.0rc9.tar.gz", hash = "sha256:535b78796b82cb74fcceddc694d0c21f90502baabff2e87a89ecf9984932028b", size = 1952404 }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/fe/00/df67fae301a0dfffd21f748cb09e3513c1a73d026e4201c23c1ecf2ee9c4/livekit_plugins_silero-1.0.11.tar.gz", hash = "sha256:f7aef0b8c5f34d8a964e8797a4d34f3c5e860795bf62fb82e7abc79c6d6d156f", size = 1952393 }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/0c/90/523926e97d6e608248bfe7e12096de40625066df414187381716d5518acb/livekit_plugins_silero-1.0.0rc9-py3-none-any.whl", hash = "sha256:a3010e5c7f197646f6cfb2d5323b69bba0fed71178e0f304f4d8858a9dfcbde3", size = 3898301 },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/b0/bc/2ef3f84be31a851c1d6b78a1e7366b4471353bbd1ef72e38547b9ec2a2c5/livekit_plugins_silero-1.0.11-py3-none-any.whl", hash = "sha256:400bfc098330c2582e4ee2f31604136e77b0fd9fbf9fe380f27ad5d13eea7913", size = 3898274 },
 ]
 
 [[package]]
@@ -982,7 +982,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "livekit-agents", specifier = "~=1.0.0rc9" },
+    { name = "livekit-agents", specifier = "~=1.0.11" },
     { name = "openai", specifier = ">=1.70.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
@@ -991,10 +991,10 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "ipykernel", specifier = ">=6.29.5" },
-    { name = "livekit-plugins-cartesia", specifier = ">=1.0.0rc9" },
-    { name = "livekit-plugins-deepgram", specifier = ">=1.0.0rc9" },
-    { name = "livekit-plugins-openai", specifier = ">=1.0.0rc9" },
-    { name = "livekit-plugins-silero", specifier = ">=1.0.0rc9" },
+    { name = "livekit-plugins-cartesia", specifier = ">=1.0.11" },
+    { name = "livekit-plugins-deepgram", specifier = ">=1.0.11" },
+    { name = "livekit-plugins-openai", specifier = ">=1.0.11" },
+    { name = "livekit-plugins-silero", specifier = ">=1.0.11" },
 ]
 
 [[package]]
