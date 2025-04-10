@@ -516,6 +516,7 @@ class SpeechStream(stt.SpeechStream):
                     request_id=self._request_id,
                     alternatives=alternatives,
                 )
+                self._event_ch.send_nowait(interim_event)
 
         elif not definite and self._speaking:
             alternatives = [
@@ -532,6 +533,7 @@ class SpeechStream(stt.SpeechStream):
                 request_id=self._request_id,
                 alternatives=alternatives,
             )
+            self._event_ch.send_nowait(interim_event)
 
         elif definite and self._speaking:
             alternatives = [
