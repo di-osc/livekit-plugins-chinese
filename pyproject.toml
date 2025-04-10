@@ -9,7 +9,7 @@ authors = [
 keywords = ["webrtc", "realtime", "audio", "video", "livekit"]
 requires-python = ">=3.9"
 dependencies = [
-    "livekit-agents~=1.0.0rc9",
+    "livekit-agents~=1.0.11",
     "openai>=1.70.0",
     "pydantic>=2.0",
     "python-dotenv>=1.1.0",
@@ -31,10 +31,10 @@ classifiers = [
 [dependency-groups]
 dev = [
     "ipykernel>=6.29.5",
-    "livekit-plugins-cartesia>=1.0.0rc9",
-    "livekit-plugins-openai>=1.0.0rc9",
-    "livekit-plugins-deepgram>=1.0.0rc9",
-    "livekit-plugins-silero>=1.0.0rc9",
+    "livekit-plugins-cartesia>=1.0.11",
+    "livekit-plugins-openai>=1.0.11",
+    "livekit-plugins-deepgram>=1.0.11",
+    "livekit-plugins-silero>=1.0.11",
 ]
 
 [[tool.uv.index]]
