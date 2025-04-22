@@ -179,3 +179,4 @@ test.py
 .python-version
 
 *.ipynb
+config.yaml
