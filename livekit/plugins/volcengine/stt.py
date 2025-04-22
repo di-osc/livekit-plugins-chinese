@@ -501,6 +501,7 @@ class SpeechStream(stt.SpeechStream):
             self._speaking = True
             start_event = stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
             self._event_ch.send_nowait(start_event)
+            logger.info("transcription start")
             if text:
                 alternatives = [
                     stt.SpeechData(
@@ -556,6 +557,7 @@ class SpeechStream(stt.SpeechStream):
             )
             self._event_ch.send_nowait(end_event)
             self._speaking = False
+            logger.info("transcription end")
 
 
 def parse_response(res):
