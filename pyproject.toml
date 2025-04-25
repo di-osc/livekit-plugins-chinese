@@ -18,6 +18,7 @@ dev = [
     "jiwer>=3.1.0",
     "ipykernel>=6.29.5",
     "livekit-plugins-silero>=1.0.17",
+    "websockets>=15.0.1",
 ]
 
 [[tool.uv.index]]
