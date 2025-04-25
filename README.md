@@ -10,6 +10,7 @@
 | 火山引擎 | ✅  | ✅  | ✅  | [点击这里](livekit-plugins/livekit-plugins-volcengine) |
 | 讯飞 | ✅  | ❎ | ❎ | [点击这里](livekit-plugins/livekit-plugins-xunfei) |
 | 百度 | ✅  | ❎ | ❎ | [点击这里](livekit-plugins/livekit-plugins-baidu) |
+| 腾讯 | ✅  | ❎ | ❎ | [点击这里](livekit-plugins/livekit-plugins-tencent) |
 
 
 
