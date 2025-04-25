@@ -39,37 +39,53 @@ class STTOptions:
 
     engine_model_type: str = "16k_zh"
     sample_rate: int = 16000
-    audio_format: str = "pcm"
+    voice_format: Literal[1, 4, 6, 8, 10, 12, 14, 16] = (
+        1  # 1：pcm；4：speex(sp)；6：silk；8：mp3；10：opus；12：wav；14：m4a（每个分片须是一个完整的 m4a 音频）；16：aac
+    )
+    need_vad: Literal[0, 1] = 1  # 0：不开启；1：开启
+    vad_silence_time: int = 500  # 240 - 2000 ms
+    noise_threshold: float = 0.5  # 噪音参数阈值，默认为0，取值范围：[-1,1]，对于一些音频片段，取值越大，判定为噪音情况越大。取值越小，判定为人声情况越大。
 
     base_url: str = "wss://asr.cloud.tencent.com/asr/v2/"
 
     def get_ws_url(self):
-        url = (
-            f"{self.base_url}{self.app_id}"
-            + f"?secretid={self.secret_id}"
-            + f"&timestamp={str(int(time.time()))}"
-            + f"&expire={int(time.time()) + 24 * 60 * 60}"
-            + f"&nonce={randint(0, 10000)}"
-            + f"&engine_model_type={self.engine_model_type}"
-            + f"&voice_id={shortuuid()}"
-        )
+        params = self.get_params()
+        url = self.base_url + str(self.app_id) + "?" + urlencode(params)
         hmacstr = hmac.new(
-            self.secret_key.encode("utf-8"), url.encode("utf-8"), hashlib.sha1
+            self.secret_key.encode("utf-8"), url[6:].encode("utf-8"), hashlib.sha1
         ).digest()
         s = base64.b64encode(hmacstr)
         s = s.decode("utf-8")
         urlencoded_s = urlencode({"signature": s})
         return url + "&" + urlencoded_s
 
+    def get_params(self):
+        params = {
+            "secretid": self.secret_id,
+            "timestamp": int(time.time()),
+            "expired": int(time.time()) + 24 * 60 * 60,
+            "nonce": randint(0, 10000),
+            "engine_model_type": self.engine_model_type,
+            "voice_id": shortuuid(),
+            "needvad": self.need_vad,
+            "vad_silence_time": self.vad_silence_time,
+            "voice_format": self.voice_format,
+        }
+        # 返回字典排序
+        return dict(sorted(params.items(), key=lambda x: x[0]))
+
+    @property
+    def language(self):
+        return self.engine_model_type.split("_")[1]
 
 
 class STT(stt.STT):
     def __init__(
         self,
         *,
-        app_id: str = None,
+        app_id: int = None,
         secret_key: str = None,
-        secret_id: int = None,
+        secret_id: str = None,
         http_session: aiohttp.ClientSession | None = None,
         interim_results: bool = True,
     ) -> None:
@@ -128,10 +144,6 @@ class STT(stt.STT):
 
 
 class SpeechStream(stt.SpeechStream):
-    _KEEPALIVE_MSG: str = json.dumps({"type": "KeepAlive"})
-    _CLOSE_MSG: str = json.dumps({"type": "CloseStream"})
-    _FINALIZE_MSG: str = json.dumps({"type": "Finalize"})
-
     def __init__(
         self,
         *,
@@ -244,6 +256,7 @@ class SpeechStream(stt.SpeechStream):
             self._session.ws_connect(self._opts.get_ws_url()),
             self._conn_options.timeout,
         )
+        logger.info("connected to stt websocket successfully")
         return ws
 
     def _on_audio_duration_report(self, duration: float) -> None:
@@ -256,19 +269,47 @@ class SpeechStream(stt.SpeechStream):
         self._event_ch.send_nowait(usage_event)
 
     def _process_stream_event(self, data: dict) -> None:
-        error_msg = data.get("err_msg", "OK")
-        if error_msg != "OK":  # silence
+        result_code = data.get("code", 0)
+        result_msg = data.get("message", None)
+        if result_code != 0:
+            logger.warning(
+                "failed to process stt message",
+                extra={"result_code": result_code, "result_msg": result_msg},
+            )
             return
-        result_type = data.get("type", None)  # "MID_TEXT" or "FIN_TEXT"
-        text = data.get("result", None)
-        start_time = data.get("start_time", None)
-        end_time = data.get("end_time", None)
-        if result_type == "MID_TEXT" and not self._speaking:
-            self._speaking = True
-            start_event = stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
-            self._event_ch.send_nowait(start_event)
-            logger.info("transcription start")
-            if text:
+        result = data.get("result")
+        if not result:
+            logger.warning(f"no result in stt message {data}")
+            result
+        else:
+            slice_type = result.get(
+                "slice_type", None
+            )  # 0：一段话开始识别 1：一段话识别中，voice_text_str 为非稳态结果(该段识别结果还可能变化) 2：一段话识别结束，voice_text_str 为稳态结果(该段识别结果不再变化)
+            start_time = result.get("start_time", None)
+            end_time = result.get("end_time", None)
+            text = result.get("voice_text_str", None)
+            if slice_type == 0 and not self._speaking:
+                self._speaking = True
+                start_event = stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
+                self._event_ch.send_nowait(start_event)
+                logger.info("transcription start")
+                if text:
+                    alternatives = [
+                        stt.SpeechData(
+                            language=self._opts.language,
+                            text=text,
+                            start_time=start_time,
+                            end_time=end_time,
+                        )
+                    ]
+                    interim_event = stt.SpeechEvent(
+                        type=stt.SpeechEventType.INTERIM_TRANSCRIPT,
+                        request_id=self._request_id,
+                        alternatives=alternatives,
+                    )
+                    self._event_ch.send_nowait(interim_event)
+
+            if slice_type == 1 and self._speaking:
                 alternatives = [
                     stt.SpeechData(
                         language=self._opts.language,
@@ -284,66 +325,62 @@ class SpeechStream(stt.SpeechStream):
                 )
                 self._event_ch.send_nowait(interim_event)
 
-        if result_type == "MID_TEXT" and self._speaking:
-            alternatives = [
-                stt.SpeechData(
-                    language=self._opts.language,
-                    text=text,
-                    start_time=start_time,
-                    end_time=end_time,
+            elif slice_type == 2 and self._speaking:
+                alternatives = [
+                    stt.SpeechData(
+                        language=self._opts.language,
+                        text=text,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                ]
+                interim_event = stt.SpeechEvent(
+                    type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                    request_id=self._request_id,
+                    alternatives=alternatives,
                 )
-            ]
-            interim_event = stt.SpeechEvent(
-                type=stt.SpeechEventType.INTERIM_TRANSCRIPT,
-                request_id=self._request_id,
-                alternatives=alternatives,
-            )
-            self._event_ch.send_nowait(interim_event)
-
-        elif result_type == "FIN_TEXT" and self._speaking:
-            alternatives = [
-                stt.SpeechData(
-                    language=self._opts.language,
-                    text=text,
-                    start_time=start_time,
-                    end_time=end_time,
+                self._event_ch.send_nowait(interim_event)
+                end_event = stt.SpeechEvent(
+                    type=stt.SpeechEventType.END_OF_SPEECH, request_id=self._request_id
                 )
-            ]
-            interim_event = stt.SpeechEvent(
-                type=stt.SpeechEventType.FINAL_TRANSCRIPT,
-                request_id=self._request_id,
-                alternatives=alternatives,
-            )
-            self._event_ch.send_nowait(interim_event)
-            end_event = stt.SpeechEvent(
-                type=stt.SpeechEventType.END_OF_SPEECH, request_id=self._request_id
-            )
-            self._event_ch.send_nowait(end_event)
-            self._speaking = False
-            logger.info(
-                "transcription end",
-                extra={"text": text, "start_time": start_time, "end_time": end_time},
-            )
-        elif result_type == "FIN_TEXT" and not self._speaking:
-            alternatives = [
-                stt.SpeechData(
-                    language=self._opts.language,
-                    text=text,
-                    start_time=start_time,
-                    end_time=end_time,
+                self._event_ch.send_nowait(end_event)
+                self._speaking = False
+                logger.info(
+                    "transcription end",
+                    extra={
+                        "text": text,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                    },
                 )
-            ]
-            interim_event = stt.SpeechEvent(
-                type=stt.SpeechEventType.FINAL_TRANSCRIPT,
-                request_id=self._request_id,
-                alternatives=alternatives,
-            )
-            self._event_ch.send_nowait(interim_event)
-            end_event = stt.SpeechEvent(
-                type=stt.SpeechEventType.END_OF_SPEECH, request_id=self._request_id
-            )
-            self._event_ch.send_nowait(end_event)
-            self._speaking = False
+            elif slice_type == 2 and not self._speaking:
+                alternatives = [
+                    stt.SpeechData(
+                        language=self._opts.language,
+                        text=text,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                ]
+                interim_event = stt.SpeechEvent(
+                    type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                    request_id=self._request_id,
+                    alternatives=alternatives,
+                )
+                self._event_ch.send_nowait(interim_event)
+                end_event = stt.SpeechEvent(
+                    type=stt.SpeechEventType.END_OF_SPEECH, request_id=self._request_id
+                )
+                self._event_ch.send_nowait(end_event)
+                self._speaking = False
+                logger.info(
+                    "transcription end",
+                    extra={
+                        "text": text,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                    },
+                )
 
 
 T = TypeVar("T")
