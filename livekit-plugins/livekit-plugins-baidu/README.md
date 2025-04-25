@@ -1,17 +1,15 @@
-# LiveKit Plugins Volcengine
+# LiveKit Plugins Baidu
 
-Agent Framework plugin for services from Volcengine(火山引擎). Currently supports [TTS](https://www.volcengine.com/docs/6561/79817), [LLM](https://www.volcengine.com/docs/82379/1298454#%E6%B5%81%E5%BC%8F%E8%B0%83%E7%94%A8), [STT](https://www.volcengine.com/docs/6561/80818#python).
+Agent Framework plugin for services from Baidu. [STT](https://cloud.baidu.com/doc/SPEECH/s/jlbxejt2i).
 
 ## Installation
 ```python
-pip install livekit-plugins-xunfei
+pip install livekit-plugins-baidu
 ```
 
 ## Pre-requisites
 
-- Volcengine TTS environment variable: `VOLCENGINE_TTS_ACCESS_TOKEN`
-- Volcengine STT environment variable: `VOLCENGINE_STT_ACCESS_TOKEN`
-- Volcengine LLM environment variable: `VOLCENGINE_LLM_API_KEY`
+- Volcengine STT environment variable: `BAIDU_API_KEY`
 
 ## Usage
 
@@ -20,7 +18,7 @@ This example shows how to use the Volcengine plugin to create a voice agent that
 
 ```python
 from livekit.agents import Agent, AgentSession, JobContext, cli, WorkerOptions
-from livekit.plugins import volcengine, deepgram, silero
+from livekit.plugins import baidu
 from dotenv import load_dotenv
 
 
@@ -33,17 +31,12 @@ async def entry_point(ctx: JobContext):
     session = AgentSession(
         # pip install livekit-plugins-silero>=1.0.0rc9
         vad=silero.VAD.load(),
-        # app_id and cluster can be found in the Volcengine STT console. https://console.volcengine.com/speech/service/16
-        stt=volcengine.STT(app_id="xxx", cluster="xxx"),
-        # app_id and cluster can be found in the Volcengine TTS console, and you can find voice type at https://www.volcengine.com/docs/6561/97465
-        tts=volcengine.TTS(app_id="xxx", cluster="xxx", vioce_type="BV001_V2_streaming"),
-        # model can be endpoint id or model id, you can find it at https://www.volcengine.com/docs/82379/1513689
-        llm=volcengine.LLM(model="doubao-1-5-lite-32k-250115"),
+        # app_id and cluster can be found in the baidu cloud console. https://console.bce.baidu.com/ai-engine/old/#/ai/speech/app/detail~appId=6752989
+        stt=volcengine.STT(app_id=1000000),
     )
     
     await session.start(agent=agent, room=ctx.room)
-    
-    await session.generate_reply()
+
 
 if __name__ == "__main__":
     load_dotenv()

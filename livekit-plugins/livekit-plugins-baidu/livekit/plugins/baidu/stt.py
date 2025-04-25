@@ -105,7 +105,7 @@ class STT(stt.STT):
             )
 
         self._opts = STTOptions(
-            app_id=self.app_id,
+            app_id=int(self.app_id),
             app_key=self.app_key,
             dev_pid=dev_pid,
         )
