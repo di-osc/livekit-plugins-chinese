@@ -1,6 +1,6 @@
 # LiveKit Plugins Baidu
 
-Agent Framework plugin for services from Baidu. [STT](https://cloud.baidu.com/doc/SPEECH/s/jlbxejt2i).
+Agent Framework plugin for services from Baidu. currently supports: [STT](https://cloud.baidu.com/doc/SPEECH/s/jlbxejt2i).
 
 ## Installation
 ```python
@@ -14,7 +14,7 @@ pip install livekit-plugins-baidu
 ## Usage
 
 
-This example shows how to use the Volcengine plugin to create a voice agent that achieved 1 second of latency.
+This example shows how to use the Baidu STT plugin.
 
 ```python
 from livekit.agents import Agent, AgentSession, JobContext, cli, WorkerOptions
@@ -29,9 +29,7 @@ async def entry_point(ctx: JobContext):
     agent = Agent(instructions="You are a helpful assistant.")
 
     session = AgentSession(
-        # pip install livekit-plugins-silero>=1.0.0rc9
-        vad=silero.VAD.load(),
-        # app_id and cluster can be found in the baidu cloud console. https://console.bce.baidu.com/ai-engine/old/#/ai/speech/app/detail~appId=6752989
+        # app_id can be found in the baidu cloud console. https://console.bce.baidu.com/ai-engine/old/#/ai/speech/app/detail~appId=6752989
         stt=volcengine.STT(app_id=1000000),
     )
     
