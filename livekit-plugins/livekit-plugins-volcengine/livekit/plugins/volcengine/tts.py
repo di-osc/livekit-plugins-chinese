@@ -308,6 +308,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                 await ws.send_bytes(data)
 
         async def _recv_task(ws: aiohttp.ClientWebSocketResponse):
+            is_first_response = True
             while True:
                 try:
                     res = await ws.receive_bytes()
@@ -316,6 +317,9 @@ class SynthesizeStream(tts.SynthesizeStream):
                     break
                 done, data = parse_response(res)
                 if data is not None:
+                    if is_first_response:
+                        logger.info("tts first response")
+                        is_first_response = False
                     frames = bstream.write(data)
                     for frame in frames:
                         emitter.push(frame)
@@ -325,14 +329,18 @@ class SynthesizeStream(tts.SynthesizeStream):
                     emitter.flush()
                     break
 
+        is_first_sentence = True
         async for token in self._input_ch:
             if isinstance(token, self._FlushSentinel):
                 sentences = sentence_splitter.process_text(text="", is_last=True)
             else:
                 sentences = sentence_splitter.process_text(text=token, is_last=False)
             for sentence in sentences:
-                if len(sentence) == 0:
+                if len(sentence.strip()) == 0:
                     continue
+                if is_first_sentence:
+                    logger.info("llm first sentence")
+                logger.info("tts start", extra={"sentence": sentence})
                 ws: aiohttp.ClientWebSocketResponse = await self._tts._connect_ws()
                 assert not ws.closed, "WebSocket connection is closed"
                 tasks = [
@@ -342,6 +350,9 @@ class SynthesizeStream(tts.SynthesizeStream):
                 await asyncio.gather(*tasks)
                 await utils.aio.gracefully_cancel(*tasks)
                 await self._tts._close_ws(ws)
+                logger.info("tts end", extra={"sentence": sentence})
+                if is_first_sentence:
+                    is_first_sentence = False
 
 
 def parse_response(res) -> Tuple[bool, ByteString | None]:
