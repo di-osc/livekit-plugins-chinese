@@ -29,7 +29,8 @@ async def entry_point(ctx: JobContext):
     agent = Agent(instructions="You are a helpful assistant.")
 
     session = AgentSession(
-        stt=minimax.STT(),
+        # you can find model and voice id at https://platform.minimaxi.com/document/T2A%20V2?key=66719005a427f0c8a5701643
+        stt=minimax.STT(model="xxx", voice_id="xxx"),
     )
     
     await session.start(agent=agent, room=ctx.room)
