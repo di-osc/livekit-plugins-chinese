@@ -22,6 +22,7 @@ from livekit.agents.types import (
 from livekit.agents.utils import is_given
 
 from .utils import to_chat_ctx, to_fnc_ctx
+from .log import logger
 
 
 @dataclass
@@ -130,7 +131,10 @@ class LLM(llm.LLM):
             elif tool_choice in ("auto", "required", "none"):
                 oai_tool_choice = tool_choice
                 extra["tool_choice"] = oai_tool_choice
-
+        last_message = next(
+            (msg for msg in reversed(chat_ctx.items) if msg.role == "user"), None
+        )
+        logger.info("llm start", extra={"query": last_message.content[0]})
         return LLMStream(
             self,
             model=self._opts.model,
@@ -169,7 +173,7 @@ class LLMStream(llm.LLMStream):
         self._fnc_raw_arguments: str | None = None
         self._tool_index: int | None = None
         retryable = True
-
+        first_response = True
         try:
             stream: openai.AsyncStream[
                 ChatCompletionChunk
@@ -189,6 +193,9 @@ class LLMStream(llm.LLMStream):
                         if chat_chunk is not None:
                             retryable = False
                             self._event_ch.send_nowait(chat_chunk)
+                        if first_response:
+                            logger.info("llm first response")
+                            first_response = False
 
                     if chunk.usage is not None:
                         retryable = False
@@ -201,6 +208,7 @@ class LLMStream(llm.LLMStream):
                             ),
                         )
                         self._event_ch.send_nowait(chunk)
+            logger.info("llm end")
 
         except openai.APITimeoutError:
             raise APITimeoutError(retryable=retryable)  # noqa: B904

@@ -556,7 +556,7 @@ class SpeechStream(stt.SpeechStream):
             )
             self._event_ch.send_nowait(end_event)
             self._speaking = False
-            logger.info("transcription end")
+            logger.info("transcription end", extra={"text": text})
 
 
 def parse_response(res):
