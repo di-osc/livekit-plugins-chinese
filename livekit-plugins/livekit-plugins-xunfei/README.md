@@ -1,6 +1,6 @@
 # LiveKit Plugins Xunfei
 
-Agent Framework plugin for services from Xunfei(火山引擎). Currently supports [STT](https://console.xfyun.cn/services/rta).
+Agent Framework plugin for services from Xunfei. Currently supports [STT](https://console.xfyun.cn/services/rta).
 
 ## Installation
 ```python
@@ -14,7 +14,7 @@ pip install livekit-plugins-xunfei
 ## Usage
 
 
-This example shows how to use the Volcengine plugin to create a voice agent that achieved 1 second of latency.
+This example shows how to use the xunfei plugin to create a voice agent.
 
 ```python
 from livekit.agents import Agent, AgentSession, JobContext, cli, WorkerOptions
