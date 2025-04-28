@@ -198,6 +198,7 @@ class SpeechStream(stt.SpeechStream):
 
                     # this will trigger a reconnection, see the _run loop
                     logger.warning("stt connection closed unexpectedly")
+                    break
 
                 try:
                     self._process_stream_event(msg.data)
