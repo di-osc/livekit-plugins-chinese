@@ -1,0 +1,41 @@
+[project]
+name = "livekit-plugins-zhipu"
+dynamic = ["version"]
+description = "LiveKit Agent Plugins for Zhipu"
+readme = "README.md"
+authors = [
+    { name = "wangmengdi", email = "790990241@qq.com" }
+]
+keywords = ["webrtc", "realtime", "audio", "video", "livekit"]
+requires-python = ">=3.9"
+dependencies = [
+    "livekit-agents~=1.0.17",
+    "openai>=1.75.0"
+    ]
+
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3 :: Only",
+]
+
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "livekit/plugins/zhipu/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["livekit"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/livekit"]
