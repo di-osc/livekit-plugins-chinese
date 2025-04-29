@@ -131,10 +131,7 @@ class LLM(llm.LLM):
             elif tool_choice in ("auto", "required", "none"):
                 oai_tool_choice = tool_choice
                 extra["tool_choice"] = oai_tool_choice
-        last_message = next(
-            (msg for msg in reversed(chat_ctx.items) if msg.role == "user"), None
-        )
-        logger.info("llm start", extra={"query": last_message.content[0]})
+        logger.info("llm start")
         return LLMStream(
             self,
             model=self._opts.model,
