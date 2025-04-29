@@ -12,6 +12,7 @@
 | 百度 | ✅  | ❎ | ❎ | [点击这里](livekit-plugins/livekit-plugins-baidu) |
 | 腾讯 | ✅  | ❎ | ❎ | [点击这里](livekit-plugins/livekit-plugins-tencent) |
 | Minimax | ❎ | ✅  | ❎ | [点击这里](livekit-plugins/livekit-plugins-minimax) |
+| 智谱 | ❎ | ❎  | ✅  | [点击这里](livekit-plugins/livekit-plugins-zhipu) |
 
 
 
