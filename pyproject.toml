@@ -7,6 +7,8 @@ livekit-plugins-xunfei = { workspace = true }
 livekit-plugins-baidu = { workspace = true }
 livekit-plugins-tencent = { workspace = true}
 livekit-plugins-minimax = { workspace = true}
+livekit-plugins-zhipu = { workspace = true}
+livekit-plugins-aliyun = { workspace = true}
 
 [tool.uv.workspace]
 members = ["livekit-plugins/*", "livekit-agents"]
