@@ -131,7 +131,7 @@ class LLM(llm.LLM):
             elif tool_choice in ("auto", "required", "none"):
                 oai_tool_choice = tool_choice
                 extra["tool_choice"] = oai_tool_choice
-        logger.info("llm start")
+        logger.info("llm start", extra={"model": self._opts.model})
         return LLMStream(
             self,
             model=self._opts.model,
