@@ -426,7 +426,7 @@ class SpeechStream(stt.SpeechStream):
                 try:
                     self._process_stream_event(msg.data)
                 except Exception:
-                    logger.exception("failed to process deepgram message")
+                    logger.exception("failed to process message")
 
         ws: aiohttp.ClientWebSocketResponse | None = None
 
