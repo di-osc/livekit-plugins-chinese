@@ -69,7 +69,7 @@ class LLM(llm.LLM):
             raise ValueError("Dify API key is required")
 
         api_base = api_base or os.environ.get("DIFY_API_BASE", "https://api.dify.ai/v1")
-        
+
         if user is None:
             user = os.environ.get("DIFY_USER", "test_user")
 
@@ -295,4 +295,3 @@ class LLMStream(llm.LLMStream):
             )
 
         return None
-
