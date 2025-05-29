@@ -184,7 +184,7 @@ class LLM(llm.LLM):
         if not api_key:
             raise ValueError("DIFY_API_KEY environment variable is required")
 
-        api_base = os.getenv("DIFY_API_BASE", "app-BbmsdDbay9Js28Ku780EDZRV")
+        api_base = os.getenv("DIFY_API_BASE", "https://api.dify.ai/v1")
 
         return cls(
             api_key=api_key,
