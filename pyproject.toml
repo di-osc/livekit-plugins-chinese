@@ -11,7 +11,7 @@ livekit-plugins-zhipu = { workspace = true}
 livekit-plugins-dify = { workspace = true}
 
 [tool.uv.workspace]
-members = ["livekit-plugins/*", "livekit-agents"]
+members = ["livekit-plugins/*"]
 
 [dependency-groups]
 dev = [
@@ -29,3 +29,21 @@ dev = [
 [[tool.uv.index]]
 name = "tsinghua"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["livekit"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
