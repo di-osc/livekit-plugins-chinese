@@ -8,7 +8,6 @@ livekit-plugins-baidu = { workspace = true }
 livekit-plugins-tencent = { workspace = true}
 livekit-plugins-minimax = { workspace = true}
 livekit-plugins-zhipu = { workspace = true}
-livekit-plugins-aliyun = { workspace = true}
 livekit-plugins-dify = { workspace = true}
 
 [tool.uv.workspace]
