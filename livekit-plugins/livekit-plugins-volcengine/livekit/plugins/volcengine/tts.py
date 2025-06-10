@@ -5,6 +5,7 @@ import base64
 import gzip
 import json
 import os
+import time
 from collections.abc import ByteString
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Tuple
@@ -309,6 +310,7 @@ class SynthesizeStream(tts.SynthesizeStream):
 
         async def _recv_task(ws: aiohttp.ClientWebSocketResponse):
             is_first_response = True
+            start_time = time.perf_counter()
             while True:
                 try:
                     res = await ws.receive_bytes()
@@ -318,7 +320,11 @@ class SynthesizeStream(tts.SynthesizeStream):
                 done, data = parse_response(res)
                 if data is not None:
                     if is_first_response:
-                        logger.info("tts first response")
+                        elapsed_time = time.perf_counter() - start_time
+                        logger.info(
+                            "tts first response",
+                            extra={"spent": round(elapsed_time, 4)},
+                        )
                         is_first_response = False
                     frames = bstream.write(data)
                     for frame in frames:

@@ -21,8 +21,8 @@ from livekit.agents.types import (
 )
 from livekit.agents.utils import is_given
 
-from .utils import to_chat_ctx, to_fnc_ctx
 from .log import logger
+from .utils import to_chat_ctx, to_fnc_ctx
 
 
 @dataclass

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import os
 import time
 import weakref
 from dataclasses import dataclass
-from typing import Callable, Generic, Literal, Optional, TypeVar
 from random import randint
-import hmac
-import base64
-import hashlib
+from typing import Callable, Generic, Literal, Optional, TypeVar
 from urllib.parse import urlencode
 
 import aiohttp

@@ -6,18 +6,19 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import aiohttp
+
 from livekit.agents import (
     APIConnectionError,
     APIStatusError,
     llm,
 )
+from livekit.agents.llm import FunctionTool, ToolChoice
 from livekit.agents.types import (
     DEFAULT_API_CONNECT_OPTIONS,
+    NOT_GIVEN,
     APIConnectOptions,
     NotGivenOr,
-    NOT_GIVEN,
 )
-from livekit.agents.llm import FunctionTool, ToolChoice
 
 from .log import logger
 
@@ -88,7 +89,7 @@ class LLM(llm.LLM):
         parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
         tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
         extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
-    ) -> "LLMStream":
+    ) -> LLMStream:
         """Start a chat completion stream"""
         # Extract the last user message
         last_message = next(
@@ -178,7 +179,7 @@ class LLM(llm.LLM):
             self._session = None
 
     @classmethod
-    def from_env(cls) -> "LLM":
+    def from_env(cls) -> LLM:
         """Create a DifyLLM instance from environment variables"""
         api_key = os.getenv("DIFY_API_KEY")
         if not api_key:
