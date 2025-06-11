@@ -11,8 +11,8 @@ requires-python = ">=3.9"
 dependencies = [
     "livekit-agents~=1.0.23",
     "openai>=1.75.0",
-    "pydantic>=2.0",
-    "python-dotenv>=1.1.0",
+    "osc-data>=0.1.7",
+    "pydantic"
 ]
 
 classifiers = [
