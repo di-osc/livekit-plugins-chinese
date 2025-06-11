@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any
+import time
 
 import httpx
 import openai
@@ -171,6 +172,7 @@ class LLMStream(llm.LLMStream):
         self._tool_index: int | None = None
         retryable = True
         first_response = True
+        start = time.perf_counter()
         try:
             stream: openai.AsyncStream[
                 ChatCompletionChunk
@@ -191,7 +193,8 @@ class LLMStream(llm.LLMStream):
                             retryable = False
                             self._event_ch.send_nowait(chat_chunk)
                         if first_response:
-                            logger.info("llm first response")
+                            spent = time.perf_counter() - start
+                            logger.info("llm first response", extra={"spent": round(spent, 4)})
                             first_response = False
 
                     if chunk.usage is not None:
