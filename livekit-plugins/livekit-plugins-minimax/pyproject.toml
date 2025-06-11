@@ -10,7 +10,8 @@ keywords = ["webrtc", "realtime", "audio", "video", "livekit"]
 requires-python = ">=3.9"
 dependencies = [
     "livekit-agents~=1.0.23",
-    "pydantic"
+    "osc-data>=0.1.7.post0",
+    "pydantic",
 ]
 
 classifiers = [
