@@ -210,10 +210,10 @@ class SynthesizeStream(tts.SynthesizeStream):
                 sentences = splitter.push(text=token)
             for sentence in sentences:
                 if first_sentence_spend is None:
-                    first_sentence_elapsed = time.perf_counter() - start_time
+                    first_sentence_spend = time.perf_counter() - start_time
                     logger.info(
                         "llm first sentence",
-                        extra={"spent": str(first_sentence_elapsed)},
+                        extra={"spent": str(first_sentence_spend)},
                     )
                 if len(sentence.strip()) > 0:
                     first_response_spend = None
