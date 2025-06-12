@@ -348,7 +348,9 @@ class SynthesizeStream(tts.SynthesizeStream):
                 if is_first_sentence:
                     is_first_sentence = False
                     elapsed_time = time.perf_counter() - start
-                    logger.info("llm first sentence", extra={"spent": round(elapsed_time, 4)})
+                    logger.info(
+                        "llm first sentence", extra={"spent": round(elapsed_time, 4)}
+                    )
                 logger.info("tts start", extra={"sentence": sentence})
                 ws: aiohttp.ClientWebSocketResponse = await self._tts._connect_ws()
                 assert not ws.closed, "WebSocket connection is closed"

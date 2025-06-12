@@ -194,7 +194,9 @@ class LLMStream(llm.LLMStream):
                             self._event_ch.send_nowait(chat_chunk)
                         if first_response:
                             spent = time.perf_counter() - start
-                            logger.info("llm first response", extra={"spent": round(spent, 4)})
+                            logger.info(
+                                "llm first response", extra={"spent": round(spent, 4)}
+                            )
                             first_response = False
 
                     if chunk.usage is not None:
