@@ -334,9 +334,10 @@ class SynthesizeStream(tts.SynthesizeStream):
         start_time = time.perf_counter()
         async for token in self._input_ch:
             if isinstance(token, self._FlushSentinel):
-                sentences = splitter.push()
+                sentences = splitter.flush()
             else:
-                sentences = splitter.flush(text=token)
+                sentences = splitter.push(text=token)
+
             for i, sentence in enumerate(sentences):
                 if first_sentence_spend is None:
                     first_sentence_spend = time.perf_counter() - start_time
