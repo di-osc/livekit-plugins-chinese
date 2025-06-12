@@ -14,6 +14,7 @@
 | Minimax | ❎ | ✅  | ❎ | [点击这里](livekit-plugins/livekit-plugins-minimax) |
 | 智谱 | ❎ | ❎  | ✅  | [点击这里](livekit-plugins/livekit-plugins-zhipu) |
 | dify | ❎ | ❎  | ✅  | [点击这里](livekit-plugins/livekit-plugins-dify) |
+| FlashTTS | ❎ | ✅  | ❎ | [点击这里](livekit-plugins/livekit-plugins-flashtts) |
 
 
 
