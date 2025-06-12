@@ -9,6 +9,7 @@ livekit-plugins-tencent = { workspace = true}
 livekit-plugins-minimax = { workspace = true}
 livekit-plugins-zhipu = { workspace = true}
 livekit-plugins-dify = { workspace = true}
+livekit-plugins-flashtts = { workspace = true}
 
 [tool.uv.workspace]
 members = ["livekit-plugins/*"]
