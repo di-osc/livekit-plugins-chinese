@@ -318,18 +318,16 @@ class SynthesizeStream(tts.SynthesizeStream):
         super().__init__(tts=tts, conn_options=conn_options)
         self._opts, self._session = opts, session
 
-    async def _run(self) -> None:
+    async def _run(self, emitter: tts.AudioEmitter) -> None:
         request_id = utils.shortuuid()
-        audio_bstream = utils.audio.AudioByteStream(
+        emitter.initialize(
+            request_id=request_id,
             sample_rate=self._opts.sample_rate,
+            mime_type="audio/pcm",
+            stream=True,
             num_channels=1,
         )
-        emitter = tts.SynthesizedAudioEmitter(
-            event_ch=self._event_ch,
-            request_id=request_id,
-        )
         splitter = TextStreamSentencizer()
-        is_last = False
         first_sentence_spend = None
         start_time = time.perf_counter()
         async for token in self._input_ch:
@@ -338,13 +336,15 @@ class SynthesizeStream(tts.SynthesizeStream):
             else:
                 sentences = splitter.push(text=token)
 
-            for i, sentence in enumerate(sentences):
-                if first_sentence_spend is None:
-                    first_sentence_spend = time.perf_counter() - start_time
-                    logger.info(
-                        "llm first sentence", extra={"spent": str(first_sentence_spend)}
-                    )
+            for sentence in sentences:
                 if len(sentence.strip()) > 0:
+                    if first_sentence_spend is None:
+                        first_sentence_spend = time.perf_counter() - start_time
+                        logger.info(
+                            "llm first sentence",
+                            extra={"spent": str(first_sentence_spend)},
+                        )
+                    emitter.start_segment(segment_id=utils.shortuuid())
                     first_response_spend = None
                     logger.info("tts start", extra={"sentence": sentence})
                     data = self._opts.get_query_params(text=sentence)
@@ -376,12 +376,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                                             "tts first response",
                                             extra={"spent": str(first_response_spend)},
                                         )
-                                    for frame in audio_bstream.write(
-                                        bytes.fromhex(audio)
-                                    ):
-                                        emitter.push(frame)
-                        for frame in audio_bstream.flush():
-                            emitter.push(frame)
+                                    emitter.push(audio)
+                    emitter.end_segment()
+                    self._pushed_text = self._pushed_text.replace(sentence, "")
                     logger.info("tts end")
-            if is_last:
-                emitter.flush()

@@ -5,6 +5,8 @@ from typing import Dict, Literal, Optional
 import os
 
 import aiohttp
+import asyncio
+import weakref
 from pydantic import BaseModel, Field
 from osc_data.text_stream import TextStreamSentencizer
 
@@ -12,7 +14,13 @@ from livekit.agents import (
     APIConnectOptions,
     tts,
     utils,
+    tokenize,
+    APIStatusError,
+    APIConnectionError,
+    APITimeoutError,
 )
+
+
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 
 from .log import logger
@@ -117,7 +125,6 @@ class TTS(tts.TTS):
         repetition_penalty: float = 1.0,
         max_tokens: int = 32768,
         http_session: aiohttp.ClientSession | None = None,
-        max_session_duration: float = 600,
     ):
         """flashtts
 
@@ -135,7 +142,6 @@ class TTS(tts.TTS):
             max_tokens (int, optional): Max tokens. Defaults to 4096.
             stream (bool, optional): Stream. Defaults to False.
             http_session (aiohttp.ClientSession | None, optional): HTTP session. Defaults to None.
-            max_session_duration (float, optional): Max session duration. Defaults to 600.
         """
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=True),
@@ -156,6 +162,7 @@ class TTS(tts.TTS):
             max_tokens=max_tokens,
         )
         self._session = http_session
+        self._streams = weakref.WeakSet[SynthesizeStream]()
 
     def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None:
@@ -164,17 +171,28 @@ class TTS(tts.TTS):
         return self._session
 
     def synthesize(
-        self, text, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
-    ):
-        raise NotImplementedError("Minimax TTS does not support synthesize method")
+        self,
+        text: str,
+        *,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> ChunkedStream:
+        return ChunkedStream(tts=self, input_text=text, conn_options=conn_options)
 
     def stream(self, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS):
-        return SynthesizeStream(
+        stream = SynthesizeStream(
             tts=self,
             conn_options=conn_options,
             opts=self._opts,
             session=self._ensure_session(),
         )
+        self._streams.add(stream)
+        return stream
+
+    async def aclose(self) -> None:
+        for stream in list(self._streams):
+            await stream.aclose()
+
+        self._streams.clear()
 
 
 class SynthesizeStream(tts.SynthesizeStream):
@@ -188,16 +206,16 @@ class SynthesizeStream(tts.SynthesizeStream):
     ):
         super().__init__(tts=tts, conn_options=conn_options)
         self._opts, self._session = opts, session
+        self._segments_ch = utils.aio.Chan[tokenize.WordStream]()
 
-    async def _run(self) -> None:
+    async def _run(self, emitter: tts.AudioEmitter) -> None:
         request_id = utils.shortuuid()
-        audio_bstream = utils.audio.AudioByteStream(
-            sample_rate=self._opts.sample_rate,
-            num_channels=1,
-        )
-        emitter = tts.SynthesizedAudioEmitter(
-            event_ch=self._event_ch,
+        emitter.initialize(
             request_id=request_id,
+            sample_rate=self._opts.sample_rate,
+            mime_type="audio/pcm",
+            stream=True,
+            num_channels=1,
         )
         splitter = TextStreamSentencizer()
         first_sentence_spend = None
@@ -209,14 +227,15 @@ class SynthesizeStream(tts.SynthesizeStream):
             else:
                 sentences = splitter.push(text=token)
             for sentence in sentences:
-                if first_sentence_spend is None:
-                    first_sentence_spend = time.perf_counter() - start_time
-                    logger.info(
-                        "llm first sentence",
-                        extra={"spent": str(first_sentence_spend)},
-                    )
                 if len(sentence.strip()) > 0:
+                    if first_sentence_spend is None:
+                        first_sentence_spend = time.perf_counter() - start_time
+                        logger.info(
+                            "llm first sentence",
+                            extra={"spent": str(first_sentence_spend)},
+                        )
                     first_response_spend = None
+                    emitter.start_segment(segment_id=utils.shortuuid)
                     logger.info("tts start", extra={"sentence": sentence})
                     data = self._opts.get_query_params(text=sentence)
                     if first_response_spend is None:
@@ -238,9 +257,63 @@ class SynthesizeStream(tts.SynthesizeStream):
                                     "tts first response",
                                     extra={"spent": str(first_response_spend)},
                                 )
-                            for frame in audio_bstream.write(data=data):
-                                emitter.push(frame)
-                        for frame in audio_bstream.flush():
-                            emitter.push(frame)
-                    emitter.flush()
+                            emitter.push(data=data)
+                    self._pushed_text = self._pushed_text.replace(sentence, "")
+                    emitter.end_segment()
                     logger.info("tts end")
+
+
+class ChunkedStream(tts.ChunkedStream):
+    def __init__(
+        self, *, tts: TTS, input_text: str, conn_options: APIConnectOptions
+    ) -> None:
+        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
+        self._tts: TTS = tts
+        self._opts = tts._opts
+
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        try:
+            logger.info("tts start", extra={"sentence": self.input_text})
+            first_response_spend = None
+            start_time = time.perf_counter()
+            data = self._opts.get_query_params(text=self.input_text)
+            async with self._tts._ensure_session().post(
+                self._opts.get_http_url(),
+                json=data,
+                timeout=aiohttp.ClientTimeout(
+                    total=30,
+                    sock_connect=self._conn_options.timeout,
+                ),
+                headers=self._opts.get_http_headers(),
+            ) as resp:
+                resp.raise_for_status()
+                output_emitter.initialize(
+                    request_id=utils.shortuuid(),
+                    sample_rate=self._opts.sample_rate,
+                    num_channels=1,
+                    mime_type="audio/pcm",
+                )
+
+                async for data, _ in resp.content.iter_chunks():
+                    if first_response_spend is None:
+                        first_response_spend = time.perf_counter() - start_time
+                        logger.info(
+                            "tts first response",
+                            extra={"spent": str(first_response_spend)},
+                        )
+                    output_emitter.push(data)
+                output_emitter.flush()
+                total_spend = time.perf_counter() - start_time
+                logger.info(
+                    "tts end",
+                    extra={"spent": str(total_spend)},
+                )
+
+        except asyncio.TimeoutError:
+            raise APITimeoutError() from None
+        except aiohttp.ClientResponseError as e:
+            raise APIStatusError(
+                message=e.message, status_code=e.status, request_id=None, body=None
+            ) from None
+        except Exception as e:
+            raise APIConnectionError() from e
