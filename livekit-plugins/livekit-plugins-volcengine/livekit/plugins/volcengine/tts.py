@@ -139,7 +139,6 @@ class TTS(tts.TTS):
         access_token: str | None = None,
         voice_type: str = "BV001_V2_streaming",
         sample_rate: Literal[24000, 16000, 8000] = 24000,
-        streaming: bool = True,
         http_session: aiohttp.ClientSession | None = None,
         max_session_duration: float = 600,
     ):
@@ -156,7 +155,7 @@ class TTS(tts.TTS):
             max_session_duration (float, optional): the max duration of the http session. Defaults to 600.
         """
         super().__init__(
-            capabilities=tts.TTSCapabilities(streaming=streaming),
+            capabilities=tts.TTSCapabilities(streaming=True),
             sample_rate=sample_rate,
             num_channels=1,
         )
@@ -182,12 +181,13 @@ class TTS(tts.TTS):
 
         return self._session
 
-    async def _connect_ws(self) -> aiohttp.ClientWebSocketResponse:
+    async def _connect_ws(self, timeout: float) -> aiohttp.ClientWebSocketResponse:
         session = self._ensure_session()
         url = self._opts.get_ws_url()
         headers = self._opts.get_ws_header()
         return await asyncio.wait_for(
-            session.ws_connect(url, headers=headers), self._conn_options.timeout
+            session.ws_connect(url, headers=headers),
+            timeout=timeout,
         )
 
     async def _close_ws(self, ws: aiohttp.ClientWebSocketResponse):
@@ -290,17 +290,17 @@ class SynthesizeStream(tts.SynthesizeStream):
         self._session = session
         self._pool = pool
 
-    async def _run(self):
+    async def _run(self, emitter: tts.AudioEmitter):
         request_id = utils.shortuuid()
 
         sentence_splitter = TextStreamSentencizer()
-        bstream = utils.audio.AudioByteStream(
+        emitter.initialize(
+            request_id=request_id,
             sample_rate=self._opts.sample_rate,
             num_channels=1,
-        )
-        emitter = tts.SynthesizedAudioEmitter(
-            event_ch=self._event_ch,
-            request_id=request_id,
+            mime_type="audio/pcm",
+            frame_size_ms=200,
+            stream=True,
         )
 
         async def _send_task(sentence: str, ws: aiohttp.ClientWebSocketResponse):
@@ -326,14 +326,9 @@ class SynthesizeStream(tts.SynthesizeStream):
                             extra={"spent": round(elapsed_time, 4)},
                         )
                         is_first_response = False
-                    frames = bstream.write(data)
-                    for frame in frames:
-                        emitter.push(frame)
+                    emitter.push(data=data)
                 if done:
-                    for frame in bstream.flush():
-                        emitter.push(frame)
-                    emitter.flush()
-                    break
+                    emitter.end_segment()
 
         is_first_sentence = True
         start = time.perf_counter()
@@ -352,18 +347,22 @@ class SynthesizeStream(tts.SynthesizeStream):
                         "llm first sentence", extra={"spent": round(elapsed_time, 4)}
                     )
                 logger.info("tts start", extra={"sentence": sentence})
-                ws: aiohttp.ClientWebSocketResponse = await self._tts._connect_ws()
-                assert not ws.closed, "WebSocket connection is closed"
-                tasks = [
-                    asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
-                    asyncio.create_task(_recv_task(ws=ws)),
-                ]
-                await asyncio.gather(*tasks)
-                await utils.aio.gracefully_cancel(*tasks)
-                await self._tts._close_ws(ws)
-                logger.info("tts end", extra={"sentence": sentence})
-                if is_first_sentence:
-                    is_first_sentence = False
+                emitter.start_segment(segment_id=utils.shortuuid())
+                async with self._tts._pool.connection(
+                    timeout=self._conn_options.timeout
+                ) as ws:
+                    assert not ws.closed, "WebSocket connection is closed"
+                    tasks = [
+                        asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
+                        asyncio.create_task(_recv_task(ws=ws)),
+                    ]
+                    await asyncio.gather(*tasks)
+                    await utils.aio.gracefully_cancel(*tasks)
+                    await self._tts._close_ws(ws)
+                    logger.info("tts end", extra={"sentence": sentence})
+                    self._pushed_text.replace(sentence, "")
+                    if is_first_sentence:
+                        is_first_sentence = False
 
 
 def parse_response(res) -> Tuple[bool, ByteString | None]:
