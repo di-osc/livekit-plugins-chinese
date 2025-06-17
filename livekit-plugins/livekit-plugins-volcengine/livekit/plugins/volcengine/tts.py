@@ -329,6 +329,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                     emitter.push(data=data)
                 if done:
                     emitter.end_segment()
+                    break
 
         is_first_sentence = True
         start = time.perf_counter()
