@@ -1,22 +1,19 @@
-from .bigmodel_stt import BigModelSTT
 from .llm import LLM
-from .stt import STT
-from .tts import TTS
 from .version import __version__
 
-__all__ = ["TTS", "LLM", "STT", "BigModelSTT", "__version__"]
+__all__ = ["LLM", "__version__"]
 
 from livekit.agents import Plugin
 
 from .log import logger
 
 
-class VolcenginePlugin(Plugin):
+class DifyPlugin(Plugin):
     def __init__(self):
         super().__init__(__name__, __version__, __package__, logger)
 
 
-Plugin.register_plugin(VolcenginePlugin())
+Plugin.register_plugin(DifyPlugin())
 
 # Cleanup docs of unexported modules
 _module = dir()

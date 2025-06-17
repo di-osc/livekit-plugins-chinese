@@ -180,3 +180,4 @@ test.py
 
 *.ipynb
 config.yaml
+uv.lock

@@ -5,12 +5,13 @@ import base64
 import gzip
 import json
 import os
+import time
 from collections.abc import ByteString
-from dataclasses import dataclass
-from typing import Dict, List, Literal, Tuple
+from typing import Dict, Literal, Tuple
 
 import aiohttp
 from pydantic import BaseModel, Field
+from osc_data.text_stream import TextStreamSentencizer
 
 from livekit.agents import (
     APIConnectionError,
@@ -138,7 +139,6 @@ class TTS(tts.TTS):
         access_token: str | None = None,
         voice_type: str = "BV001_V2_streaming",
         sample_rate: Literal[24000, 16000, 8000] = 24000,
-        streaming: bool = True,
         http_session: aiohttp.ClientSession | None = None,
         max_session_duration: float = 600,
     ):
@@ -155,7 +155,7 @@ class TTS(tts.TTS):
             max_session_duration (float, optional): the max duration of the http session. Defaults to 600.
         """
         super().__init__(
-            capabilities=tts.TTSCapabilities(streaming=streaming),
+            capabilities=tts.TTSCapabilities(streaming=True),
             sample_rate=sample_rate,
             num_channels=1,
         )
@@ -181,12 +181,13 @@ class TTS(tts.TTS):
 
         return self._session
 
-    async def _connect_ws(self) -> aiohttp.ClientWebSocketResponse:
+    async def _connect_ws(self, timeout: float) -> aiohttp.ClientWebSocketResponse:
         session = self._ensure_session()
         url = self._opts.get_ws_url()
         headers = self._opts.get_ws_header()
         return await asyncio.wait_for(
-            session.ws_connect(url, headers=headers), self._conn_options.timeout
+            session.ws_connect(url, headers=headers),
+            timeout=timeout,
         )
 
     async def _close_ws(self, ws: aiohttp.ClientWebSocketResponse):
@@ -289,17 +290,17 @@ class SynthesizeStream(tts.SynthesizeStream):
         self._session = session
         self._pool = pool
 
-    async def _run(self):
+    async def _run(self, emitter: tts.AudioEmitter):
         request_id = utils.shortuuid()
 
-        sentence_splitter = ChineseSentenceSplitter()
-        bstream = utils.audio.AudioByteStream(
+        sentence_splitter = TextStreamSentencizer()
+        emitter.initialize(
+            request_id=request_id,
             sample_rate=self._opts.sample_rate,
             num_channels=1,
-        )
-        emitter = tts.SynthesizedAudioEmitter(
-            event_ch=self._event_ch,
-            request_id=request_id,
+            mime_type="audio/pcm",
+            frame_size_ms=200,
+            stream=True,
         )
 
         async def _send_task(sentence: str, ws: aiohttp.ClientWebSocketResponse):
@@ -309,6 +310,7 @@ class SynthesizeStream(tts.SynthesizeStream):
 
         async def _recv_task(ws: aiohttp.ClientWebSocketResponse):
             is_first_response = True
+            start_time = time.perf_counter()
             while True:
                 try:
                     res = await ws.receive_bytes()
@@ -318,41 +320,49 @@ class SynthesizeStream(tts.SynthesizeStream):
                 done, data = parse_response(res)
                 if data is not None:
                     if is_first_response:
-                        logger.info("tts first response")
+                        elapsed_time = time.perf_counter() - start_time
+                        logger.info(
+                            "tts first response",
+                            extra={"spent": round(elapsed_time, 4)},
+                        )
                         is_first_response = False
-                    frames = bstream.write(data)
-                    for frame in frames:
-                        emitter.push(frame)
+                    emitter.push(data=data)
                 if done:
-                    for frame in bstream.flush():
-                        emitter.push(frame)
-                    emitter.flush()
-                    break
+                    emitter.end_segment()
 
         is_first_sentence = True
+        start = time.perf_counter()
         async for token in self._input_ch:
             if isinstance(token, self._FlushSentinel):
-                sentences = sentence_splitter.process_text(text="", is_last=True)
+                sentences = sentence_splitter.flush()
             else:
-                sentences = sentence_splitter.process_text(text=token, is_last=False)
+                sentences = sentence_splitter.push(text=token)
             for sentence in sentences:
                 if len(sentence.strip()) == 0:
                     continue
                 if is_first_sentence:
-                    logger.info("llm first sentence")
-                logger.info("tts start", extra={"sentence": sentence})
-                ws: aiohttp.ClientWebSocketResponse = await self._tts._connect_ws()
-                assert not ws.closed, "WebSocket connection is closed"
-                tasks = [
-                    asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
-                    asyncio.create_task(_recv_task(ws=ws)),
-                ]
-                await asyncio.gather(*tasks)
-                await utils.aio.gracefully_cancel(*tasks)
-                await self._tts._close_ws(ws)
-                logger.info("tts end", extra={"sentence": sentence})
-                if is_first_sentence:
                     is_first_sentence = False
+                    elapsed_time = time.perf_counter() - start
+                    logger.info(
+                        "llm first sentence", extra={"spent": round(elapsed_time, 4)}
+                    )
+                logger.info("tts start", extra={"sentence": sentence})
+                emitter.start_segment(segment_id=utils.shortuuid())
+                async with self._tts._pool.connection(
+                    timeout=self._conn_options.timeout
+                ) as ws:
+                    assert not ws.closed, "WebSocket connection is closed"
+                    tasks = [
+                        asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
+                        asyncio.create_task(_recv_task(ws=ws)),
+                    ]
+                    await asyncio.gather(*tasks)
+                    await utils.aio.gracefully_cancel(*tasks)
+                    await self._tts._close_ws(ws)
+                    logger.info("tts end", extra={"sentence": sentence})
+                    self._pushed_text.replace(sentence, "")
+                    if is_first_sentence:
+                        is_first_sentence = False
 
 
 def parse_response(res) -> Tuple[bool, ByteString | None]:
@@ -385,101 +395,3 @@ def parse_response(res) -> Tuple[bool, ByteString | None]:
         return False, None
     else:
         return True, None
-
-
-@dataclass
-class ChineseSentenceSplitter:
-    buffer: str = ""
-    use_level2_threshold: int = 100
-    use_level3_threshold: int = 200
-
-    def process_text(
-        self,
-        text: str,
-        is_last: bool = False,
-        special_text: str | None = None,
-    ) -> List[str]:
-        self.buffer = self.buffer + text
-        if special_text is not None:
-            if self.buffer.endswith(special_text):
-                return [self.buffer]
-        sentences, indices = self.split_sentences(self.buffer)
-        assert len(sentences) == len(indices), (
-            "The number of sentences and indices do not match"
-        )
-        if not is_last:
-            if len(indices) != 0:
-                self.buffer = self.buffer[indices[-1] + 1 :]
-            return sentences
-        else:
-            if len(sentences) == 0:
-                sentences = [self.buffer]
-                self.buffer = ""
-                return sentences
-            if indices[-1] == len(self.buffer) - 1:
-                self.buffer = ""
-                return sentences
-            else:
-                self.buffer = ""
-                return sentences + [text[indices[-1] + 1 :]]
-
-    def split_sentences(self, text: str) -> List[str]:
-        indices = self.get_sentence_end_indices(text)
-        sentences = []
-        start = 0
-        for i in indices:
-            t = text[start : i + 1]
-            if len(t) > 0:
-                sentences.append(t)
-                start = i + 1
-        return sentences, indices
-
-    def is_sentence_end_level1(self, text: str) -> bool:
-        return text.endswith(
-            (
-                "!",
-                "?",
-                "。",
-                "？",
-                "！",
-                "；",
-                ";",
-            )
-        )
-
-    def is_sentence_end_level2(self, text: str) -> bool:
-        return text.endswith(
-            (
-                "、",
-                "...",
-                "…",
-                ",",
-                "，",
-            )
-        )
-
-    def is_sentence_end_level3(self, text: str) -> bool:
-        return text.endswith(
-            (
-                ":",
-                "：",
-            )
-        )
-
-    def get_sentence_end_indices(self, text: str) -> List[int]:
-        sents_l1 = [i for i, c in enumerate(text) if self.is_sentence_end_level1(c)]
-        if len(sents_l1) == 0 and len(text) > self.use_level2_threshold:
-            sents_l2 = [i for i, c in enumerate(text) if self.is_sentence_end_level2(c)]
-            if len(sents_l2) == 0 and len(text) > self.use_level3_threshold:
-                sents_l3 = [
-                    i for i, c in enumerate(text) if self.is_sentence_end_level3(c)
-                ]
-                return sents_l3
-            else:
-                return sents_l2
-
-        else:
-            return sents_l1
-
-    def reset(self):
-        self.buffer = ""

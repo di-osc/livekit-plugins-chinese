@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import time
-from dataclasses import dataclass
-from typing import Dict, List, Literal
+from typing import Dict, Literal
 
 import aiohttp
 from pydantic import BaseModel, Field
+from osc_data.text_stream import TextStreamSentencizer
 
 from livekit.agents import (
     APIConnectOptions,
@@ -318,34 +318,33 @@ class SynthesizeStream(tts.SynthesizeStream):
         super().__init__(tts=tts, conn_options=conn_options)
         self._opts, self._session = opts, session
 
-    async def _run(self) -> None:
+    async def _run(self, emitter: tts.AudioEmitter) -> None:
         request_id = utils.shortuuid()
-        audio_bstream = utils.audio.AudioByteStream(
+        emitter.initialize(
+            request_id=request_id,
             sample_rate=self._opts.sample_rate,
+            mime_type="audio/pcm",
+            stream=True,
             num_channels=1,
         )
-        emitter = tts.SynthesizedAudioEmitter(
-            event_ch=self._event_ch,
-            request_id=request_id,
-        )
-        splitter = ChineseSentenceSplitter()
-        is_last = False
+        splitter = TextStreamSentencizer()
         first_sentence_spend = None
         start_time = time.perf_counter()
         async for token in self._input_ch:
             if isinstance(token, self._FlushSentinel):
-                is_last = True
-                sentences = splitter.process_text(text="", is_last=True)
+                sentences = splitter.flush()
             else:
-                is_last = False
-                sentences = splitter.process_text(text=token, is_last=False)
-            for i, sentence in enumerate(sentences):
-                if first_sentence_spend is None:
-                    first_sentence_spend = time.perf_counter() - start_time
-                    logger.info(
-                        "llm first sentence", extra={"spent": str(first_sentence_spend)}
-                    )
+                sentences = splitter.push(text=token)
+
+            for sentence in sentences:
                 if len(sentence.strip()) > 0:
+                    if first_sentence_spend is None:
+                        first_sentence_spend = time.perf_counter() - start_time
+                        logger.info(
+                            "llm first sentence",
+                            extra={"spent": str(first_sentence_spend)},
+                        )
+                    emitter.start_segment(segment_id=utils.shortuuid())
                     first_response_spend = None
                     logger.info("tts start", extra={"sentence": sentence})
                     data = self._opts.get_query_params(text=sentence)
@@ -377,111 +376,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                                             "tts first response",
                                             extra={"spent": str(first_response_spend)},
                                         )
-                                    for frame in audio_bstream.write(
-                                        bytes.fromhex(audio)
-                                    ):
-                                        emitter.push(frame)
-
+                                    emitter.push(audio)
+                    emitter.end_segment()
+                    self._pushed_text = self._pushed_text.replace(sentence, "")
                     logger.info("tts end")
-            if is_last:
-                for frame in audio_bstream.flush():
-                    emitter.push(frame)
-                emitter.flush()
-
-
-@dataclass
-class ChineseSentenceSplitter:
-    buffer: str = ""
-    use_level2_threshold: int = 100
-    use_level3_threshold: int = 200
-
-    def process_text(
-        self,
-        text: str,
-        is_last: bool = False,
-        special_text: str | None = None,
-    ) -> List[str]:
-        self.buffer = self.buffer + text
-        if special_text is not None:
-            if self.buffer.endswith(special_text):
-                return [self.buffer]
-        sentences, indices = self.split_sentences(self.buffer)
-        assert len(sentences) == len(indices), (
-            "The number of sentences and indices do not match"
-        )
-        if not is_last:
-            if len(indices) != 0:
-                self.buffer = self.buffer[indices[-1] + 1 :]
-            return sentences
-        else:
-            if len(sentences) == 0:
-                sentences = [self.buffer]
-                self.buffer = ""
-                return sentences
-            if indices[-1] == len(self.buffer) - 1:
-                self.buffer = ""
-                return sentences
-            else:
-                self.buffer = ""
-                return sentences + [text[indices[-1] + 1 :]]
-
-    def split_sentences(self, text: str) -> List[str]:
-        indices = self.get_sentence_end_indices(text)
-        sentences = []
-        start = 0
-        for i in indices:
-            t = text[start : i + 1]
-            if len(t) > 0:
-                sentences.append(t)
-                start = i + 1
-        return sentences, indices
-
-    def is_sentence_end_level1(self, text: str) -> bool:
-        return text.endswith(
-            (
-                "!",
-                "?",
-                "。",
-                "？",
-                "！",
-                "；",
-                ";",
-            )
-        )
-
-    def is_sentence_end_level2(self, text: str) -> bool:
-        return text.endswith(
-            (
-                "、",
-                "...",
-                "…",
-                ",",
-                "，",
-            )
-        )
-
-    def is_sentence_end_level3(self, text: str) -> bool:
-        return text.endswith(
-            (
-                ":",
-                "：",
-            )
-        )
-
-    def get_sentence_end_indices(self, text: str) -> List[int]:
-        sents_l1 = [i for i, c in enumerate(text) if self.is_sentence_end_level1(c)]
-        if len(sents_l1) == 0 and len(text) > self.use_level2_threshold:
-            sents_l2 = [i for i, c in enumerate(text) if self.is_sentence_end_level2(c)]
-            if len(sents_l2) == 0 and len(text) > self.use_level3_threshold:
-                sents_l3 = [
-                    i for i, c in enumerate(text) if self.is_sentence_end_level3(c)
-                ]
-                return sents_l3
-            else:
-                return sents_l2
-
-        else:
-            return sents_l1
-
-    def reset(self):
-        self.buffer = ""

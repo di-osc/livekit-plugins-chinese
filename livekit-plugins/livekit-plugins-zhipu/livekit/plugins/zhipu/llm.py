@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any
+import time
 
 import httpx
 import openai
@@ -21,8 +22,8 @@ from livekit.agents.types import (
 )
 from livekit.agents.utils import is_given
 
-from .utils import to_chat_ctx, to_fnc_ctx
 from .log import logger
+from .utils import to_chat_ctx, to_fnc_ctx
 
 
 @dataclass
@@ -131,7 +132,7 @@ class LLM(llm.LLM):
             elif tool_choice in ("auto", "required", "none"):
                 oai_tool_choice = tool_choice
                 extra["tool_choice"] = oai_tool_choice
-        logger.info("llm start")
+        logger.info("llm start", extra={"model": self._opts.model})
         return LLMStream(
             self,
             model=self._opts.model,
@@ -171,6 +172,7 @@ class LLMStream(llm.LLMStream):
         self._tool_index: int | None = None
         retryable = True
         first_response = True
+        start = time.perf_counter()
         try:
             stream: openai.AsyncStream[
                 ChatCompletionChunk
@@ -191,7 +193,10 @@ class LLMStream(llm.LLMStream):
                             retryable = False
                             self._event_ch.send_nowait(chat_chunk)
                         if first_response:
-                            logger.info("llm first response")
+                            spent = time.perf_counter() - start
+                            logger.info(
+                                "llm first response", extra={"spent": round(spent, 4)}
+                            )
                             first_response = False
 
                     if chunk.usage is not None:
