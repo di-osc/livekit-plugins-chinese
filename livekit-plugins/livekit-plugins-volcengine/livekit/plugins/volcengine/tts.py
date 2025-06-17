@@ -328,7 +328,6 @@ class SynthesizeStream(tts.SynthesizeStream):
                         is_first_response = False
                     emitter.push(data=data)
                 if done:
-                    emitter.end_segment()
                     break
 
         is_first_sentence = True
@@ -361,6 +360,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                     await utils.aio.gracefully_cancel(*tasks)
                     await self._tts._close_ws(ws)
                     logger.info("tts end", extra={"sentence": sentence})
+                    emitter.end_segment()
                     self._pushed_text.replace(sentence, "")
                     if is_first_sentence:
                         is_first_sentence = False
