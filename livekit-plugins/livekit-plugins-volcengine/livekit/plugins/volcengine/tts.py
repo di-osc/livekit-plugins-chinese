@@ -328,6 +328,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                         is_first_response = False
                     emitter.push(data=data)
                 if done:
+                    emitter.end_segment()
                     break
 
         is_first_sentence = True
@@ -351,19 +352,16 @@ class SynthesizeStream(tts.SynthesizeStream):
                 async with self._tts._pool.connection(
                     timeout=self._conn_options.timeout
                 ) as ws:
-                    assert not ws.closed, "WebSocket connection is closed"
                     tasks = [
                         asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
                         asyncio.create_task(_recv_task(ws=ws)),
                     ]
-                    await asyncio.gather(*tasks)
-                    await utils.aio.gracefully_cancel(*tasks)
-                    await self._tts._close_ws(ws)
+                    try:
+                        await asyncio.gather(*tasks)
+                    finally:
+                        await utils.aio.gracefully_cancel(*tasks)
                     logger.info("tts end", extra={"sentence": sentence})
-                    emitter.end_segment()
-                    self._pushed_text.replace(sentence, "")
-                    if is_first_sentence:
-                        is_first_sentence = False
+                    self._pushed_text = self._pushed_text.replace(sentence, "")
 
 
 def parse_response(res) -> Tuple[bool, ByteString | None]:
