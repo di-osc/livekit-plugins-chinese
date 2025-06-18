@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List
 
 import asyncio
-from dashscope.audio.asr import (Recognition, RecognitionCallback, RecognitionResult)
+from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
 
 from livekit import rtc
 from livekit.agents import stt, utils, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
@@ -13,7 +13,6 @@ from livekit.agents.types import (
     NotGivenOr,
 )
 from .log import logger
-
 
 
 @dataclass
@@ -33,18 +32,20 @@ class STT(stt.STT):
     def __init__(
         self,
         *,
-        language = "zh",
+        language="zh",
         detect_language: bool = False,
         interim_results: bool = True,
         punctuate: bool = True,
         smart_format: bool = True,
         model: str = "paraformer-realtime-v2",
         api_key: str | None = None,
-        min_silence_duration: int = 500
+        min_silence_duration: int = 500,
     ) -> None:
-        super().__init__(capabilities=stt.STTCapabilities(
+        super().__init__(
+            capabilities=stt.STTCapabilities(
                 streaming=True, interim_results=interim_results
-            ))
+            )
+        )
         api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
         if api_key is None:
             raise ValueError("DASHSCOPE API key is required")
@@ -71,15 +72,13 @@ class STT(stt.STT):
     def stream(
         self,
         *,
-        language:  str | None = None,
+        language: str | None = None,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> "SpeechStream":
         return SpeechStream(stt=self, opts=self._opts, conn_options=conn_options)
 
 
-
 class SpeechStream(stt.SpeechStream):
-
     def __init__(
         self,
         stt: STT,
@@ -93,18 +92,19 @@ class SpeechStream(stt.SpeechStream):
         self._opts: STTOptions = opts
         self._config = opts
         self._speaking = False
-        self.recognition = Recognition(model=opts.model,
-                          format='pcm',
-                          sample_rate=opts.sample_rate,
-                          callback=Callback(self),
-                          disfluency_removal_enabled=True,
-                          semantic_punctuation_enabled=False,
-                          max_sentence_silence=opts.endpointing,
-                          language_hints=[opts.language])
+        self.recognition = Recognition(
+            model=opts.model,
+            format="pcm",
+            sample_rate=opts.sample_rate,
+            callback=Callback(self),
+            disfluency_removal_enabled=True,
+            semantic_punctuation_enabled=False,
+            max_sentence_silence=opts.endpointing,
+            language_hints=[opts.language],
+        )
         self._closed = False
         self._request_id = utils.shortuuid()
         self._reconnect_event = asyncio.Event()
-
 
     async def _run(self) -> None:
         self.recognition.start()
@@ -136,29 +136,31 @@ def live_transcription_to_speech_data(
     language: str,
     data,
 ) -> List[stt.SpeechData]:
-
     return [
-         stt.SpeechData(
+        stt.SpeechData(
             language=language,
-            start_time=data['begin_time'],
-            end_time=data['end_time'],
+            start_time=data["begin_time"],
+            end_time=data["end_time"],
             confidence=0.0,
-            text=data['text'],
+            text=data["text"],
         )
     ]
-    
-    
+
+
 class Callback(RecognitionCallback):
     def __init__(self, _stt: SpeechStream):
         self._stt = _stt
+
     def on_event(self, result: RecognitionResult) -> None:
         sentence = result.get_sentence()
-        dg_alts = live_transcription_to_speech_data(self._stt._config.language, sentence)
+        dg_alts = live_transcription_to_speech_data(
+            self._stt._config.language, sentence
+        )
         if not result.is_sentence_end(sentence):
             interim_event = stt.SpeechEvent(
-                    type=stt.SpeechEventType.INTERIM_TRANSCRIPT,
-                    alternatives=dg_alts,
-                )
+                type=stt.SpeechEventType.INTERIM_TRANSCRIPT,
+                alternatives=dg_alts,
+            )
             self._stt._event_ch.send_nowait(interim_event)
             logger.info("transcription start")
         else:
@@ -167,4 +169,6 @@ class Callback(RecognitionCallback):
                 alternatives=dg_alts,
             )
             self._stt._event_ch.send_nowait(final_event)
-            logger.info("transcription end", extra={"text": final_event.alternatives[0].text})
+            logger.info(
+                "transcription end", extra={"text": final_event.alternatives[0].text}
+            )

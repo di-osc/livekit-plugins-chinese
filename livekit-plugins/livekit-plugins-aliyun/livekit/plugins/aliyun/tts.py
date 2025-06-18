@@ -14,6 +14,7 @@ from .log import logger
 
 STREAM_EOS = "EOS"
 
+
 @dataclass
 class TTSOptions:
     api_key: str
@@ -30,22 +31,22 @@ class TTSOptions:
     sample_rate: int
     # 音调，取值范围：0.5~2。
     pitch: float = 1.0
-    
+
     def get_ws_url(self) -> str:
         return "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
-    
+
     def get_ws_header(self) -> Dict[str, str]:
         return {
             "Authorization": f"bearer {self.api_key}",
-            "X-DashScope-DataInspection": "enable"
+            "X-DashScope-DataInspection": "enable",
         }
-        
+
     def get_run_task_params(self) -> Dict[str, str]:
         params = {
             "header": {
                 "action": "run-task",
                 "task_id": utils.shortuuid(),
-                "streaming": "duplex"
+                "streaming": "duplex",
             },
             "payload": {
                 "task_group": "audio",
@@ -54,69 +55,65 @@ class TTSOptions:
                 "model": self.model,
                 "parameters": {
                     "text_type": "PlainText",
-                    "voice": "longxiaochun_v2",         
-                    "format": "pcm",		        
-                    "sample_rate": self.sample_rate,     
-                    "volume": self.volume,		
-                    "rate": self.rate,				
-                    "pitch": self.pitch				
+                    "voice": "longxiaochun_v2",
+                    "format": "pcm",
+                    "sample_rate": self.sample_rate,
+                    "volume": self.volume,
+                    "rate": self.rate,
+                    "pitch": self.pitch,
                 },
-                "input": {
-                    
-                }
-            }
+                "input": {},
+            },
         }
         return params
-    
+
     def get_continue_task_params(self, text: str) -> Dict[str, str]:
         params = {
             "header": {
                 "action": "continue-task",
                 "task_id": utils.shortuuid(),
-                "streaming": "duplex"
+                "streaming": "duplex",
             },
             "payload": {
                 "input": {
                     "text": text,
                 }
-            }
+            },
         }
         return params
-    
+
     def get_finish_task_params(self) -> Dict[str, str]:
         params = {
             "header": {
                 "action": "finish-task",
                 "task_id": utils.shortuuid(),
-                "streaming": "duplex"
+                "streaming": "duplex",
             },
-            "payload": {
-                "input": {
-                }
-            }
+            "payload": {"input": {}},
         }
         return params
 
 
-
 class TTS(tts.TTS):
     def __init__(
-            self,
-            *,
-            api_key: Optional[str] = None,
-            sample_rate: int = 24000,
-            voice: str = "longcheng",
-            model: str = "cosyvoice-v2",
-            speech_rate: int = 1,
-            volume: int = 100,
-            rate: float = 1.0,
-            pitch: float = 1.0,
-            http_session: aiohttp.ClientSession | None = None,
-            max_session_duration: float = 600,
+        self,
+        *,
+        api_key: Optional[str] = None,
+        sample_rate: int = 24000,
+        voice: str = "longcheng",
+        model: str = "cosyvoice-v2",
+        speech_rate: int = 1,
+        volume: int = 100,
+        rate: float = 1.0,
+        pitch: float = 1.0,
+        http_session: aiohttp.ClientSession | None = None,
+        max_session_duration: float = 600,
     ) -> None:
-        super().__init__(capabilities=tts.TTSCapabilities(streaming=True),
+        super().__init__(
+            capabilities=tts.TTSCapabilities(streaming=True),
             sample_rate=sample_rate,
-            num_channels=1,)
+            num_channels=1,
+        )
         api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
         if not api_key:
             raise ValueError("DASHSCOPE_API_KEY must be set")
@@ -137,7 +134,7 @@ class TTS(tts.TTS):
             max_session_duration=max_session_duration,
             mark_refreshed_on_get=True,
         )
-    
+
     def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None:
             self._session = utils.http_context.http_session()
@@ -157,32 +154,29 @@ class TTS(tts.TTS):
         await ws.close()
 
     def synthesize(
-            self,
-            text: str,
+        self,
+        text: str,
     ) -> AsyncIterable[tts.SynthesizedAudio]:
         raise NotImplementedError
 
     def stream(
-            self,
-            *,
-            conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
+        self, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
     ) -> "SynthesizeStream":
         return SynthesizeStream(tts=self, opts=self._opts, conn_options=conn_options)
 
 
 class SynthesizeStream(tts.SynthesizeStream):
     def __init__(
-            self,
-            *,
-            tts: TTS,
-            opts: TTSOptions,
-            conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+        self,
+        *,
+        tts: TTS,
+        opts: TTSOptions,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ):
         super().__init__(tts=tts, conn_options=conn_options)
         self._opts = opts
 
     async def _run(self, emitter: tts.AudioEmitter) -> None:
-        
         request_id = utils.shortuuid()
         emitter.initialize(
             request_id=request_id,
@@ -190,16 +184,16 @@ class SynthesizeStream(tts.SynthesizeStream):
             mime_type="audio/pcm",
             stream=True,
             num_channels=1,
-            frame_size_ms=200
+            frame_size_ms=200,
         )
-        
+
         async def _send_task(sentence: str, ws: aiohttp.ClientWebSocketResponse):
-                run_task_params = self._opts.get_run_task_params()
-                await ws.send_json(run_task_params)
-                continue_task_params = self._opts.get_continue_task_params(text=sentence)
-                await ws.send_json(continue_task_params)
-                finish_task_params = self._opts.get_finish_task_params()
-                await ws.send_json(finish_task_params)
+            run_task_params = self._opts.get_run_task_params()
+            await ws.send_json(run_task_params)
+            continue_task_params = self._opts.get_continue_task_params(text=sentence)
+            await ws.send_json(continue_task_params)
+            finish_task_params = self._opts.get_finish_task_params()
+            await ws.send_json(finish_task_params)
 
         async def _recv_task(ws: aiohttp.ClientWebSocketResponse):
             is_first_response = True
@@ -232,7 +226,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                             if event == "task-failed":
                                 error_msg = msg_json.get("error_message", "未知错误")
                                 logger.error(f"任务失败: {error_msg}")
-        
+
         splitter = TextStreamSentencizer()
         is_first_sentence = True
         start_time = time.perf_counter()
