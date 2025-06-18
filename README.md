@@ -15,6 +15,7 @@
 | 智谱 | ❎ | ❎  | ✅  | [点击这里](livekit-plugins/livekit-plugins-zhipu) |
 | Dify | ❎ | ❎  | ✅  | [点击这里](livekit-plugins/livekit-plugins-dify) |
 | FlashTTS | ❎ | ✅  | ❎ | [点击这里](livekit-plugins/livekit-plugins-flashtts) |
+| 阿里云 | ✅ | ✅  | ✅ | [点击这里](livekit-plugins/livekit-plugins-aliyun) |
 
 
 

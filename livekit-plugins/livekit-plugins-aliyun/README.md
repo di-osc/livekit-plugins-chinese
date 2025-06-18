@@ -29,7 +29,7 @@ async def entry_point(ctx: JobContext):
 
     session = AgentSession(
         stt=aliyun.STT(model="paraformer-realtime-v2"),
-        tts=aliyun.TTS(),
+        tts=aliyun.TTS(model="cosyvoice-v2", voice="longcheng_v2"),
         llm=aliyun.LLM(model="qwen-plus"),
     )
     
