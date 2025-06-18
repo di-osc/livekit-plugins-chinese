@@ -1,171 +1,288 @@
-import asyncio
-import codecs
-import json
-import os
-from typing import MutableSet, Literal, Any
+from __future__ import annotations
 
-import aiohttp
-from attrs import define
+import os
+from dataclasses import dataclass
+from typing import Any
+import time
+
+import httpx
+import openai
+from openai.types.chat import ChatCompletionChunk, ChatCompletionToolChoiceOptionParam
+from openai.types.chat.chat_completion_chunk import Choice
+
+from livekit.agents import APIConnectionError, APIStatusError, APITimeoutError, llm
+from livekit.agents.llm import ToolChoice
+from livekit.agents.llm.chat_context import ChatContext
+from livekit.agents.llm.tool_context import FunctionTool
 from livekit.agents.types import (
     DEFAULT_API_CONNECT_OPTIONS,
     NOT_GIVEN,
     APIConnectOptions,
     NotGivenOr,
 )
-from livekit.agents import APIConnectionError, APIStatusError, APITimeoutError, llm
-from livekit.agents.llm import ToolChoice
-from livekit.agents.llm.chat_context import ChatContext
-from livekit.agents.llm.tool_context import FunctionTool
+from livekit.agents.utils import is_given
 
+from .log import logger
 from .utils import to_chat_ctx, to_fnc_ctx
 
 
-ChatModels = Literal["qwen-plus", "qwen-max"]
-
-
-@define
-class LLMOptions:
-    model: ChatModels
-    base_url: str
-    api_key: str
+@dataclass
+class _LLMOptions:
+    model: str
+    user: NotGivenOr[str]
+    temperature: NotGivenOr[float]
+    parallel_tool_calls: NotGivenOr[bool]
+    tool_choice: NotGivenOr[ToolChoice]
+    store: NotGivenOr[bool]
+    metadata: NotGivenOr[dict[str, str]]
 
 
 class LLM(llm.LLM):
     def __init__(
-            self,
-            *,
-            model: ChatModels = "qwen-plus",
-            api_key: str = "",
-            base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        self,
+        *,
+        model: str = "qwen-plus",
+        api_key: NotGivenOr[str] = NOT_GIVEN,
+        client: openai.AsyncClient | None = None,
+        user: NotGivenOr[str] = NOT_GIVEN,
+        temperature: NotGivenOr[float] = NOT_GIVEN,
+        parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
+        tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
+        store: NotGivenOr[bool] = NOT_GIVEN,
+        metadata: NotGivenOr[dict[str, str]] = NOT_GIVEN,
+        timeout: httpx.Timeout | None = None,
     ) -> None:
-        api_key = api_key or os.environ.get("ALIYUN_LLM_API_KEY")
-        base_url = base_url or os.environ.get("ALIYUN_LLM_BASE_URL")
-        if not api_key or not base_url:
-            dashscope_api_key = os.environ.get("DASHSCOPE_API_KEY")
-            if not dashscope_api_key:
-                raise ValueError("both DASHSCOPE_API_KEY or other  llm base_url and api_key must be set")
-            else:
-                self._opts = LLMOptions(model=model, base_url="xxxx", api_key=dashscope_api_key)
-        else:
-            self._opts = LLMOptions(model=model, base_url=base_url, api_key=api_key)
-        self._running_fncs: MutableSet[asyncio.Task] = set()
+        """
+        Create a new instance of LLM.
 
-    async def fetch_stream(self, url, headers, data):
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=json.dumps(data), timeout=60000) as resp:
-                lines = []
-                async for block in resp.content.iter_any():
-                    lines = block.decode('utf-8').splitlines(keepends=False)
-                    for line in lines:
-                        if line:
-                            yield line.encode('utf-8')
+        Args:
+            model: The model to use for the LLM, end with -v1.
+            api_key: The API key to use for the LLM.
+            base_url: The base URL to use for the LLM.
+        """
+        super().__init__()
+        self._opts = _LLMOptions(
+            model=model,
+            user=user,
+            temperature=temperature,
+            parallel_tool_calls=parallel_tool_calls,
+            tool_choice=tool_choice,
+            store=store,
+            metadata=metadata,
+        )
+        api_key = api_key if is_given(api_key) else os.getenv("DASHSCOPE_API_KEY")
+        if api_key is None:
+            raise ValueError("environment variable DASHSCOPE_API_KEY is not set")
+        self._client = client or openai.AsyncClient(
+            api_key=api_key if is_given(api_key) else None,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            max_retries=0,
+            http_client=httpx.AsyncClient(
+                timeout=timeout
+                if timeout
+                else httpx.Timeout(connect=15.0, read=5.0, write=5.0, pool=5.0),
+                follow_redirects=True,
+                limits=httpx.Limits(
+                    max_connections=50,
+                    max_keepalive_connections=50,
+                    keepalive_expiry=120,
+                ),
+            ),
+        )
 
-    async def chat(
+    def chat(
+        self,
+        *,
+        chat_ctx: ChatContext,
+        tools: list[FunctionTool] | None = None,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+        parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
+        tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
+        extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
+    ) -> LLMStream:
+        extra = {}
+
+        if is_given(extra_kwargs):
+            extra.update(extra_kwargs)
+
+        if is_given(self._opts.metadata):
+            extra["metadata"] = self._opts.metadata
+
+        if is_given(self._opts.user):
+            extra["user"] = self._opts.user
+
+        parallel_tool_calls = (
+            parallel_tool_calls
+            if is_given(parallel_tool_calls)
+            else self._opts.parallel_tool_calls
+        )
+        if is_given(parallel_tool_calls):
+            extra["parallel_tool_calls"] = parallel_tool_calls
+
+        tool_choice = tool_choice if is_given(tool_choice) else self._opts.tool_choice  # type: ignore
+        if is_given(tool_choice):
+            oai_tool_choice: ChatCompletionToolChoiceOptionParam
+            if isinstance(tool_choice, dict):
+                oai_tool_choice = {
+                    "type": "function",
+                    "function": {"name": tool_choice["function"]["name"]},
+                }
+                extra["tool_choice"] = oai_tool_choice
+            elif tool_choice in ("auto", "required", "none"):
+                oai_tool_choice = tool_choice
+                extra["tool_choice"] = oai_tool_choice
+        logger.info("llm start", extra={"model": self._opts.model})
+        return LLMStream(
             self,
-            chat_ctx: ChatContext,
-            tools: list[FunctionTool] | None = None,
-            conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
-            parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
-            tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
-            extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
-    ) -> "LLMStream":
-        pass
-        # llm_config = self._opts
-        # url = llm_config.base_url
-        # headers = {
-        #     'Authorization': f"Bearer {llm_config.api_key}",
-        #     'Content-Type': 'application/json'
-        # }
-
-        # req_data = {
-        #     "messages": to_openai_ctx(history),
-        #     "stream": True,
-        #     "max_tokens": 500,
-        #     "model": self._opts.model,
-        # }
-        # async_gen = self.fetch_stream(url, headers, req_data)
-        # return LLMStream(async_gen, fnc_ctx)
+            model=self._opts.model,
+            client=self._client,
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            conn_options=conn_options,
+            extra_kwargs=extra,
+        )
 
 
 class LLMStream(llm.LLMStream):
     def __init__(
-            self, oai_stream, fnc_ctx: llm.FunctionContext | None
+        self,
+        llm: LLM,
+        *,
+        model: str,
+        client: openai.AsyncClient,
+        chat_ctx: llm.ChatContext,
+        tools: list[FunctionTool],
+        conn_options: APIConnectOptions,
+        extra_kwargs: dict[str, Any],
     ) -> None:
-        super().__init__()
-        self._oai_stream = oai_stream
-        self._fnc_ctx = fnc_ctx
-        self._running_fncs: MutableSet[asyncio.Task] = set()
+        super().__init__(llm, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options)
+        self._model = model
+        self._client = client
+        self._llm = llm
+        self._extra_kwargs = extra_kwargs
 
-    def __aiter__(self) -> "LLMStream":
-        return self
+    async def _run(self) -> None:
+        # current function call that we're waiting for full completion (args are streamed)
+        # (defined inside the _run method to make sure the state is reset for each run/attempt)
+        self._oai_stream: openai.AsyncStream[ChatCompletionChunk] | None = None
+        self._tool_call_id: str | None = None
+        self._fnc_name: str | None = None
+        self._fnc_raw_arguments: str | None = None
+        self._tool_index: int | None = None
+        retryable = True
+        first_response = True
+        start = time.perf_counter()
+        try:
+            stream: openai.AsyncStream[
+                ChatCompletionChunk
+            ] = await self._client.chat.completions.create(
+                messages=to_chat_ctx(self._chat_ctx, id(self._llm)),
+                tools=to_fnc_ctx(self._tools) if self._tools else openai.NOT_GIVEN,
+                model=self._model,
+                stream_options={"include_usage": True},
+                stream=True,
+                **self._extra_kwargs,
+            )
 
-    async def __anext__(self) -> llm.ChatChunk:
-        answer = ""
-        async for line in self._oai_stream:
-            if line:
-                line = codecs.decode(line)
-                if line.startswith("data:"):
-                    line = line[5:].strip()
-                    try:
-                        chunk = json.loads(line)
-                        if "choices" in chunk and len(
-                                chunk["choices"]) > 0 and "delta" in chunk["choices"][0] and "content" in \
-                                chunk["choices"][0]["delta"]:
-                            delta = chunk["choices"][0]["delta"]
-                            answer += delta["content"]
-                            print(answer)
-                            return llm.ChatChunk(
-                                choices=[
-                                    llm.Choice(
-                                        delta=llm.ChoiceDelta(
-                                            content=delta["content"],
-                                            role='assistant',
-                                        ),
-                                        index=0,
-                                    )
-                                ]
+            async with stream:
+                async for chunk in stream:
+                    for choice in chunk.choices:
+                        chat_chunk = self._parse_choice(chunk.id, choice)
+                        if chat_chunk is not None:
+                            retryable = False
+                            self._event_ch.send_nowait(chat_chunk)
+                        if first_response:
+                            spent = time.perf_counter() - start
+                            logger.info(
+                                "llm first response", extra={"spent": round(spent, 4)}
                             )
-                    except json.JSONDecodeError as err:
-                        # print(f"error : {err}")
-                        raise StopAsyncIteration
-            else:
-                raise StopAsyncIteration
-        raise StopAsyncIteration
+                            first_response = False
 
-    async def aclose(self, wait: bool = True) -> None:
-        if not wait:
-            for task in self._running_fncs:
-                task.cancel()
+                    if chunk.usage is not None:
+                        retryable = False
+                        chunk = llm.ChatChunk(
+                            id=chunk.id,
+                            usage=llm.CompletionUsage(
+                                completion_tokens=chunk.usage.completion_tokens,
+                                prompt_tokens=chunk.usage.prompt_tokens,
+                                total_tokens=chunk.usage.total_tokens,
+                            ),
+                        )
+                        self._event_ch.send_nowait(chunk)
+            logger.info("llm end")
 
-        await asyncio.gather(*self._running_fncs, return_exceptions=True)
+        except openai.APITimeoutError:
+            raise APITimeoutError(retryable=retryable)  # noqa: B904
+        except openai.APIStatusError as e:
+            raise APIStatusError(  # noqa: B904
+                e.message,
+                status_code=e.status_code,
+                request_id=e.request_id,
+                body=e.body,
+                retryable=retryable,
+            )
+        except Exception as e:
+            raise APIConnectionError(retryable=retryable) from e
 
+    def _parse_choice(self, id: str, choice: Choice) -> llm.ChatChunk | None:
+        delta = choice.delta
 
-def to_openai_ctx(chat_ctx: llm.ChatContext) -> list:
-    print(chat_ctx)
-    content = '''
-    # 角色
-    你是小六，是由六六六研发的智能助手，能够与用户交流,回答问题。
+        if delta is None:
+            return None
 
-    ## 技能
-    ### 技能 1: 正确理解用户的问题
-    用户的问题由语音转文字而来,可能存在错字别字,请你正确理解相关问题
-    ### 技能 2: 回答用户的问题
-    1. 你的回答应当简洁明了,避免过分冗长,尽量以50字内的回答回复用户。
-    ### 技能 3: 当用户叫你名字"小六"进行对话唤醒时,回答"您好，我是小六，请问有什么可以帮助您的？"
-    
-    ## 限制:
-    - 当用户询问你的身份信息等敏感问题时,回答你的名字"我是小六，使用六六六全新一代AI视觉大模型，欢迎随时找我聊天"或者""对不起,我还不太了解""
-    '''
-    messages = [
-        {'role': 'system', 'content': content}
-    ]
-    for msg in chat_ctx.messages:
-        messages.append(
-            {
-                    "role": 'user',
-                    "content": msg.text,
-            }
+        if delta.tool_calls:
+            for tool in delta.tool_calls:
+                if not tool.function:
+                    continue
+
+                call_chunk = None
+                if self._tool_call_id and tool.id and tool.index != self._tool_index:
+                    call_chunk = llm.ChatChunk(
+                        id=id,
+                        delta=llm.ChoiceDelta(
+                            role="assistant",
+                            content=delta.content,
+                            tool_calls=[
+                                llm.FunctionToolCall(
+                                    arguments=self._fnc_raw_arguments or "",
+                                    name=self._fnc_name or "",
+                                    call_id=self._tool_call_id or "",
+                                )
+                            ],
+                        ),
+                    )
+                    self._tool_call_id = self._fnc_name = self._fnc_raw_arguments = None
+
+                if tool.function.name:
+                    self._tool_index = tool.index
+                    self._tool_call_id = tool.id
+                    self._fnc_name = tool.function.name
+                    self._fnc_raw_arguments = tool.function.arguments or ""
+                elif tool.function.arguments:
+                    self._fnc_raw_arguments += tool.function.arguments  # type: ignore
+
+                if call_chunk is not None:
+                    return call_chunk
+
+        if choice.finish_reason in ("tool_calls", "stop") and self._tool_call_id:
+            call_chunk = llm.ChatChunk(
+                id=id,
+                delta=llm.ChoiceDelta(
+                    role="assistant",
+                    content=delta.content,
+                    tool_calls=[
+                        llm.FunctionToolCall(
+                            arguments=self._fnc_raw_arguments or "",
+                            name=self._fnc_name or "",
+                            call_id=self._tool_call_id or "",
+                        )
+                    ],
+                ),
+            )
+            self._tool_call_id = self._fnc_name = self._fnc_raw_arguments = None
+            return call_chunk
+
+        return llm.ChatChunk(
+            id=id,
+            delta=llm.ChoiceDelta(content=delta.content, role="assistant"),
         )
-
-    print(messages)
-    return messages

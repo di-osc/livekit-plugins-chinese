@@ -25,7 +25,8 @@ dev = [
     "ipykernel>=6.29.5",
     "livekit-plugins-silero>=1.0.17",
     "websockets>=15.0.1",
-    "jsonargparse"
+    "jsonargparse",
+    "pyaudio>=0.2.14",
 ]
 
 [[tool.uv.index]]

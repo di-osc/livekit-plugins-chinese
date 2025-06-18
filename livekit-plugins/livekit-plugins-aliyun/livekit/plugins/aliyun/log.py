@@ -1,3 +1,3 @@
 from logging import getLogger
 
-logger = getLogger("livekit.plugins.volcengine")
+logger = getLogger("livekit.plugins.aliyun")
