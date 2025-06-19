@@ -24,8 +24,16 @@ class STTOptions:
     punctuate: bool
     model: str
     smart_format: bool
-    endpointing: int | None
+    max_sentence_silence: int | None = None
     sample_rate: int = 16000
+    # 过滤语气词
+    disfluency_removal_enabled: bool = False
+    # 设置是否开启语义断句，默认关闭。
+    semantic_punctuation_enabled: bool = False
+    # 设置是否开启标点预测，默认关闭。
+    punctuation_prediction_enabled: bool = True
+    # 设置是否开启文本逆归一化，默认关闭。
+    inverse_text_normalization_enabled: bool = True
 
 
 class STT(stt.STT):
@@ -39,7 +47,11 @@ class STT(stt.STT):
         smart_format: bool = True,
         model: str = "paraformer-realtime-v2",
         api_key: str | None = None,
-        min_silence_duration: int = 500,
+        max_sentence_silence: int = 500,
+        disfluency_removal_enabled: bool = False,
+        semantic_punctuation_enabled: bool = False,
+        punctuation_prediction_enabled: bool = True,
+        inverse_text_normalization_enabled: bool = True,
     ) -> None:
         super().__init__(
             capabilities=stt.STTCapabilities(
@@ -57,7 +69,11 @@ class STT(stt.STT):
             punctuate=punctuate,
             model=model,
             smart_format=smart_format,
-            endpointing=min_silence_duration,
+            max_sentence_silence=max_sentence_silence,
+            disfluency_removal_enabled=disfluency_removal_enabled,
+            semantic_punctuation_enabled=semantic_punctuation_enabled,
+            punctuation_prediction_enabled=punctuation_prediction_enabled,
+            inverse_text_normalization_enabled=inverse_text_normalization_enabled,
         )
 
     async def _recognize_impl(
@@ -97,9 +113,11 @@ class SpeechStream(stt.SpeechStream):
             format="pcm",
             sample_rate=opts.sample_rate,
             callback=Callback(self),
-            disfluency_removal_enabled=True,
-            semantic_punctuation_enabled=False,
-            max_sentence_silence=opts.endpointing,
+            disfluency_removal_enabled=opts.disfluency_removal_enabled,
+            semantic_punctuation_enabled=opts.semantic_punctuation_enabled,
+            punctuation_prediction_enabled=opts.punctuation_prediction_enabled,
+            inverse_text_normalization_enabled=opts.inverse_text_normalization_enabled,
+            max_sentence_silence=opts.max_sentence_silence,
             language_hints=[opts.language],
         )
         self._closed = False
