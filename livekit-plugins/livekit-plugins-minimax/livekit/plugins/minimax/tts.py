@@ -354,7 +354,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                         self._opts.get_http_url(),
                         json=data,
                         timeout=aiohttp.ClientTimeout(
-                            total=30,
+                            total=300,
                             sock_connect=self._conn_options.timeout,
                         ),
                         headers=self._opts.get_http_header(),
