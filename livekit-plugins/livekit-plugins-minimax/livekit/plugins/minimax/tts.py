@@ -376,6 +376,8 @@ class SynthesizeStream(tts.SynthesizeStream):
                                             "tts first response",
                                             extra={"spent": str(first_response_spend)},
                                         )
+                                    # audio hex编码
+                                    audio = bytes.fromhex(audio)
                                     emitter.push(audio)
                     emitter.end_segment()
                     self._pushed_text = self._pushed_text.replace(sentence, "")
