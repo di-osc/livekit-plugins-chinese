@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import gzip
 import json
 import os
@@ -14,10 +13,7 @@ from pydantic import BaseModel, Field
 from osc_data.text_stream import TextStreamSentencizer
 
 from livekit.agents import (
-    APIConnectionError,
     APIConnectOptions,
-    APIStatusError,
-    APITimeoutError,
     tts,
     utils,
 )
@@ -138,9 +134,8 @@ class TTS(tts.TTS):
         cluster: str,
         access_token: str | None = None,
         voice_type: str = "BV001_V2_streaming",
-        sample_rate: Literal[24000, 16000, 8000] = 24000,
+        sample_rate: Literal[24000, 16000, 8000] = 16000,
         http_session: aiohttp.ClientSession | None = None,
-        max_session_duration: float = 600,
     ):
         """VolcEngine TTS
 
@@ -152,7 +147,6 @@ class TTS(tts.TTS):
             sample_rate (Literal[24000, 16000, 8000], optional): the sample rate of the tts. Defaults to 24000.
             streaming (bool, optional): whether to use the streaming api. Defaults to True.
             http_session (aiohttp.ClientSession | None, optional): the http session to use. Defaults to None.
-            max_session_duration (float, optional): the max duration of the http session. Defaults to 600.
         """
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=True),
@@ -168,17 +162,18 @@ class TTS(tts.TTS):
         )
         self._session = http_session
 
-        self._pool = utils.ConnectionPool[aiohttp.ClientWebSocketResponse](
+        self._pool = utils.ConnectionPool[
+            aiohttp.ClientWebSocketResponse
+        ](
             connect_cb=self._connect_ws,
             close_cb=self._close_ws,
-            max_session_duration=max_session_duration,
-            mark_refreshed_on_get=True,
+            max_session_duration=30,  # 火山ws30s会自动关闭，所以至少30s以内自动建立新的连接。
+            mark_refreshed_on_get=False,
         )
 
     def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None:
             self._session = utils.http_context.http_session()
-
         return self._session
 
     async def _connect_ws(self, timeout: float) -> aiohttp.ClientWebSocketResponse:
@@ -195,14 +190,8 @@ class TTS(tts.TTS):
 
     def synthesize(
         self, text, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS
-    ) -> ChunedStream:
-        return ChunedStream(
-            opts=self._opts,
-            session=self._ensure_session(),
-            tts=self,
-            input_text=text,
-            conn_options=conn_options,
-        )
+    ):
+        raise NotImplementedError
 
     def stream(self, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS):
         return SynthesizeStream(
@@ -212,67 +201,6 @@ class TTS(tts.TTS):
             pool=self._pool,
             session=self._ensure_session(),
         )
-
-
-class ChunedStream(tts.ChunkedStream):
-    def __init__(
-        self,
-        *,
-        opts: _TTSOptions,
-        session: aiohttp.ClientSession,
-        tts: TTS,
-        input_text,
-        conn_options=None,
-    ):
-        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
-        self._opts: _TTSOptions = opts
-        self._session = session
-
-    async def _run(self) -> None:
-        request_id = utils.shortuuid()
-        bstream = utils.audio.AudioByteStream(
-            sample_rate=self._opts.sample_rate, num_channels=1
-        )
-        data = self._opts.get_http_query_params(text=self._input_text)
-        headers = self._opts.get_http_header()
-        try:
-            async with self._session.post(
-                self._opts.get_http_url(),
-                json=data,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(
-                    total=30,
-                    sock_connect=self._conn_options.timeout,
-                ),
-            ) as resp:
-                resp.raise_for_status()
-                emitter = tts.SynthesizedAudioEmitter(
-                    event_ch=self._event_ch,
-                    request_id=request_id,
-                )
-                data = await resp.json()
-                if "data" in data:
-                    data = data["data"]
-                    data = base64.b64decode(data)
-                    frames = bstream.write(data)
-                    for frame in frames:
-                        emitter.push(frame)
-                    for frame in bstream.flush():
-                        emitter.push(frame)
-                    emitter.flush()
-        except asyncio.TimeoutError as e:
-            raise APITimeoutError() from e
-        except aiohttp.ClientResponseError as e:
-            raise APIStatusError(
-                message=e.message,
-                status_code=e.status,
-                request_id=None,
-                body=None,
-            ) from e
-        except Exception as e:
-            raise APIConnectionError() from e
-        finally:
-            emitter.flush()
 
 
 class SynthesizeStream(tts.SynthesizeStream):
@@ -328,7 +256,6 @@ class SynthesizeStream(tts.SynthesizeStream):
                         is_first_response = False
                     emitter.push(data=data)
                 if done:
-                    emitter.end_segment()
                     break
 
         is_first_sentence = True
@@ -352,6 +279,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                 async with self._tts._pool.connection(
                     timeout=self._conn_options.timeout
                 ) as ws:
+                    assert not ws.closed, "WebSocket connection is closed"
                     tasks = [
                         asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
                         asyncio.create_task(_recv_task(ws=ws)),
@@ -360,8 +288,9 @@ class SynthesizeStream(tts.SynthesizeStream):
                         await asyncio.gather(*tasks)
                     finally:
                         await utils.aio.gracefully_cancel(*tasks)
-                    logger.info("tts end", extra={"sentence": sentence})
-                    self._pushed_text = self._pushed_text.replace(sentence, "")
+                emitter.end_segment()
+                logger.info("tts end", extra={"sentence": sentence})
+                self._pushed_text = self._pushed_text.replace(sentence, "")
 
 
 def parse_response(res) -> Tuple[bool, ByteString | None]:
