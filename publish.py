@@ -21,7 +21,7 @@ def run(version: str):
         print(f"Building {plugin_name} for version {version}")
         # 修改livekit-agent版本
         agent_version = version.split(".post")[0]
-        os.system(f"""cd {plugin} && uv add "livekit-agents>={agent_version}" --dev""")
+        os.system(f'''cd {plugin} && uv add "livekit-agents>={agent_version}"''')
         # 修改version.py文件
         with open(plugin / f"livekit/plugins/{plugin_name}" / "version.py", "w") as f:
             f.write(f'''__version__ = "{version}"''')
