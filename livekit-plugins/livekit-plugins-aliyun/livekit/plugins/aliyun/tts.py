@@ -55,7 +55,7 @@ class TTSOptions:
                 "model": self.model,
                 "parameters": {
                     "text_type": "PlainText",
-                    "voice": "longxiaochun_v2",
+                    "voice": self.voice,
                     "format": "pcm",
                     "sample_rate": self.sample_rate,
                     "volume": self.volume,
