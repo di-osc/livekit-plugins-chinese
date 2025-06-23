@@ -6,7 +6,7 @@ import json
 import os
 import time
 from collections.abc import ByteString
-from typing import Dict, Literal, Tuple
+from typing import Literal, Tuple
 
 import aiohttp
 from pydantic import BaseModel, Field
