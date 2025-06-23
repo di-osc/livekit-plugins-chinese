@@ -94,6 +94,9 @@ class TTS(tts.TTS):
         cluster: str,
         access_token: str | None = None,
         voice: str = "BV001_V2_streaming",
+        speed: float = 1.0,
+        volume: float = 1.0,
+        pitch: float = 1.0,
         sample_rate: Literal[24000, 16000, 8000] = 16000,
         http_session: aiohttp.ClientSession | None = None,
     ):
@@ -119,6 +122,9 @@ class TTS(tts.TTS):
             access_token=access_token,
             voice=voice,
             sample_rate=sample_rate,
+            speed=speed,
+            volume=volume,
+            pitch=pitch,
         )
         self._session = http_session
 
