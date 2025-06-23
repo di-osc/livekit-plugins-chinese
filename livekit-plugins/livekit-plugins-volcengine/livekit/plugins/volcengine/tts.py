@@ -26,54 +26,14 @@ class _TTSOptions(BaseModel):
     app_id: str
     cluster: str
     access_token: str | None = None
-    voice_type: str = "BV001_V2_streaming"
-    base_url: str = "https://openspeech.bytedance.com/api/v1"
+    voice: str = "BV001_V2_streaming"
+    base_url: str = "wss://openspeech.bytedance.com/api/v1"
     sample_rate: Literal[24000, 16000, 8000] = 24000
     encoding: Literal["mp3", "pcm"] = "pcm"
     speed: float = Field(1.0, ge=0.2, le=3.0)
     volume: float = Field(1.0, gt=0.1, le=3.0)
     pitch: float = Field(1.0, ge=0.1, le=3.0)
 
-    def get_http_url(self):
-        return f"{self.base_url}/tts"
-
-    def get_http_header(self):
-        if self.access_token is None:
-            self.access_token = os.getenv("VOLCENGINE_TTS_ACCESS_TOKEN")
-            if self.access_token is None:
-                raise ValueError("VOLCENGINE_TTS_ACCESS_TOKEN is not set")
-        return {
-            "Authorization": f"Bearer;{self.access_token}",
-        }
-
-    def get_http_query_params(self, text: str, uid: str | None = None) -> Dict:
-        if uid is None:
-            uid = utils.shortuuid()
-        request_json = {
-            "app": {
-                "appid": self.app_id,
-                "token": self.access_token,
-                "cluster": self.cluster,
-            },
-            "user": {"uid": uid},
-            "audio": {
-                "voice_type": self.voice_type,
-                "encoding": self.encoding,
-                "speed_ratio": self.speed,
-                "volume_ratio": self.volume,
-                "pitch_ratio": 1.0,
-                "rate": self.sample_rate,
-            },
-            "request": {
-                "reqid": utils.shortuuid(),
-                "text": text,
-                "text_type": "plain",
-                "operation": "query",
-                "with_frontend": self.pitch,
-                "frontend_type": "unitTson",
-            },
-        }
-        return request_json
 
     def get_ws_url(self):
         return f"{self.base_url}/tts/ws_binary"
@@ -89,7 +49,7 @@ class _TTSOptions(BaseModel):
             },
             "user": {"uid": uid},
             "audio": {
-                "voice_type": self.voice_type,
+                "voice_type": self.voice,
                 "encoding": self.encoding,
                 "speed_ratio": self.speed,
                 "volume_ratio": self.volume,
@@ -133,7 +93,7 @@ class TTS(tts.TTS):
         app_id: str,
         cluster: str,
         access_token: str | None = None,
-        voice_type: str = "BV001_V2_streaming",
+        voice: str = "BV001_V2_streaming",
         sample_rate: Literal[24000, 16000, 8000] = 16000,
         http_session: aiohttp.ClientSession | None = None,
     ):
@@ -157,7 +117,7 @@ class TTS(tts.TTS):
             app_id=app_id,
             cluster=cluster,
             access_token=access_token,
-            voice_type=voice_type,
+            voice=voice,
             sample_rate=sample_rate,
         )
         self._session = http_session
