@@ -90,7 +90,7 @@ class BigModelSTTOptions:
     # audio
     base_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
     format: Literal["pcm", "wav", "ogg"] = "pcm"
-    rate: int = 16000
+    sample_rate: int = 16000
     bits: int = 16
     num_channels: int = 1
     language: str = "zh-CN"
@@ -117,7 +117,7 @@ class BigModelSTTOptions:
             "user": {"uid": uid},
             "audio": {
                 "format": self.format,
-                "rate": self.rate,
+                "rate": self.sample_rate,
                 "bits": self.bits,
                 "channels": self.num_channels,
                 "codec": self.codec,
