@@ -9,6 +9,7 @@ import asyncio
 import weakref
 from pydantic import BaseModel, Field
 from osc_data.text_stream import TextStreamSentencizer
+from osc_data.text import TextNormalizer
 
 from livekit.agents import (
     APIConnectOptions,
@@ -218,6 +219,7 @@ class SynthesizeStream(tts.SynthesizeStream):
             num_channels=1,
         )
         splitter = TextStreamSentencizer()
+        tn = TextNormalizer(remove_erhua=False)
         first_sentence_spend = None
         start_time = time.perf_counter()
         async for token in self._input_ch:
@@ -228,6 +230,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                 sentences = splitter.push(text=token)
             for sentence in sentences:
                 if len(sentence.strip()) > 0:
+                    sentence = tn.normalize(sentence)
                     if first_sentence_spend is None:
                         first_sentence_spend = time.perf_counter() - start_time
                         logger.info(
