@@ -26,7 +26,7 @@ class _TTSOptions(BaseModel):
     app_id: str
     cluster: str
     access_token: str | None = None
-    voice_type: str = "BV001_V2_streaming"
+    voice: str = "BV001_V2_streaming"
     base_url: str = "https://openspeech.bytedance.com/api/v1"
     sample_rate: Literal[24000, 16000, 8000] = 24000
     encoding: Literal["mp3", "pcm"] = "pcm"
@@ -57,7 +57,7 @@ class _TTSOptions(BaseModel):
             },
             "user": {"uid": uid},
             "audio": {
-                "voice_type": self.voice_type,
+                "voice_type": self.voice,
                 "encoding": self.encoding,
                 "speed_ratio": self.speed,
                 "volume_ratio": self.volume,
@@ -89,7 +89,7 @@ class _TTSOptions(BaseModel):
             },
             "user": {"uid": uid},
             "audio": {
-                "voice_type": self.voice_type,
+                "voice_type": self.voice,
                 "encoding": self.encoding,
                 "speed_ratio": self.speed,
                 "volume_ratio": self.volume,
@@ -133,7 +133,7 @@ class TTS(tts.TTS):
         app_id: str,
         cluster: str,
         access_token: str | None = None,
-        voice_type: str = "BV001_V2_streaming",
+        voice: str = "BV001_V2_streaming",
         sample_rate: Literal[24000, 16000, 8000] = 16000,
         http_session: aiohttp.ClientSession | None = None,
     ):
@@ -157,7 +157,7 @@ class TTS(tts.TTS):
             app_id=app_id,
             cluster=cluster,
             access_token=access_token,
-            voice_type=voice_type,
+            voice=voice,
             sample_rate=sample_rate,
         )
         self._session = http_session
