@@ -316,9 +316,9 @@ class SpeechStream(stt.SpeechStream):
             full_client_request = self._opts.get_ws_query_params(uid=self._request_id)
             await ws.send_bytes(full_client_request)
 
-            samples_100ms = self._opts.rate // 10
+            samples_100ms = self._opts.sample_rate // 10
             audio_bstream = utils.audio.AudioByteStream(
-                sample_rate=self._opts.rate,
+                sample_rate=self._opts.sample_rate,
                 num_channels=self._opts.num_channels,
                 samples_per_channel=samples_100ms,
             )
