@@ -1,6 +1,6 @@
 # LiveKit Plugins Minimax
 
-Agent Framework plugin for services from minimax(海螺AI). currently supports: [TTS](https://platform.minimaxi.com/document/Price?key=66701c7e1d57f38758d5818c).
+Agent Framework plugin for services from minimax(海螺AI). currently supports: [TTS](https://platform.minimaxi.com/document/Price?key=66701c7e1d57f38758d5818c), [LLM](https://platform.minimaxi.com/document/%E5%AF%B9%E8%AF%9D?key=66701d281d57f38758d581d0)
 
 ## Installation
 ```python
@@ -31,6 +31,7 @@ async def entry_point(ctx: JobContext):
     session = AgentSession(
         # you can find model and voice id at https://platform.minimaxi.com/document/T2A%20V2?key=66719005a427f0c8a5701643
         stt=minimax.STT(model="xxx", voice_id="xxx"),
+        llm=minimax.LLM(model="MiniMax-Text-01")
     )
     
     await session.start(agent=agent, room=ctx.room)
