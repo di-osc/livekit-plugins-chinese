@@ -5,7 +5,6 @@ from typing import Dict, Literal, Optional
 import os
 
 import aiohttp
-import asyncio
 import weakref
 from pydantic import BaseModel, Field
 from osc_data.text_stream import TextStreamSentencizer
@@ -16,9 +15,6 @@ from livekit.agents import (
     tts,
     utils,
     tokenize,
-    APIStatusError,
-    APIConnectionError,
-    APITimeoutError,
 )
 
 
