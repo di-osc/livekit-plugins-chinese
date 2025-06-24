@@ -176,8 +176,8 @@ class TTS(tts.TTS):
         text: str,
         *,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
-    ) -> ChunkedStream:
-        return ChunkedStream(tts=self, input_text=text, conn_options=conn_options)
+    ):
+        raise NotImplementedError
 
     def stream(self, *, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS):
         stream = SynthesizeStream(
@@ -261,62 +261,6 @@ class SynthesizeStream(tts.SynthesizeStream):
                                     extra={"spent": str(first_response_spend)},
                                 )
                             emitter.push(data=data)
-                    self._pushed_text = self._pushed_text.replace(sentence, "")
-                    emitter.end_segment()
+                        self._pushed_text = ""
+                        emitter.end_segment()
                     logger.info("tts end")
-
-
-class ChunkedStream(tts.ChunkedStream):
-    def __init__(
-        self, *, tts: TTS, input_text: str, conn_options: APIConnectOptions
-    ) -> None:
-        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
-        self._tts: TTS = tts
-        self._opts = tts._opts
-
-    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
-        try:
-            logger.info("tts start", extra={"sentence": self.input_text})
-            first_response_spend = None
-            start_time = time.perf_counter()
-            data = self._opts.get_query_params(text=self.input_text)
-            async with self._tts._ensure_session().post(
-                self._opts.get_http_url(),
-                json=data,
-                timeout=aiohttp.ClientTimeout(
-                    total=30,
-                    sock_connect=self._conn_options.timeout,
-                ),
-                headers=self._opts.get_http_headers(),
-            ) as resp:
-                resp.raise_for_status()
-                output_emitter.initialize(
-                    request_id=utils.shortuuid(),
-                    sample_rate=self._opts.sample_rate,
-                    num_channels=1,
-                    mime_type="audio/pcm",
-                )
-
-                async for data, _ in resp.content.iter_chunks():
-                    if first_response_spend is None:
-                        first_response_spend = time.perf_counter() - start_time
-                        logger.info(
-                            "tts first response",
-                            extra={"spent": str(first_response_spend)},
-                        )
-                    output_emitter.push(data)
-                output_emitter.flush()
-                total_spend = time.perf_counter() - start_time
-                logger.info(
-                    "tts end",
-                    extra={"spent": str(total_spend)},
-                )
-
-        except asyncio.TimeoutError:
-            raise APITimeoutError() from None
-        except aiohttp.ClientResponseError as e:
-            raise APIStatusError(
-                message=e.message, status_code=e.status, request_id=None, body=None
-            ) from None
-        except Exception as e:
-            raise APIConnectionError() from e
