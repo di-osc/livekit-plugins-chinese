@@ -297,7 +297,9 @@ class SpeechStream(stt.SpeechStream):
         conn_options: APIConnectOptions,
         http_session: aiohttp.ClientSession,
     ) -> None:
-        super().__init__(stt=stt, conn_options=conn_options, sample_rate=opts.sample_rate)
+        super().__init__(
+            stt=stt, conn_options=conn_options, sample_rate=opts.sample_rate
+        )
 
         self._opts = opts
         self._session = http_session

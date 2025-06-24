@@ -34,7 +34,6 @@ class _TTSOptions(BaseModel):
     volume: float = Field(1.0, gt=0.1, le=3.0)
     pitch: float = Field(1.0, ge=0.1, le=3.0)
 
-
     def get_ws_url(self):
         return f"{self.base_url}/tts/ws_binary"
 
