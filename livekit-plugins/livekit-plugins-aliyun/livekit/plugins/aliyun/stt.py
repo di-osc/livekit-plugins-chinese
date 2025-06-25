@@ -26,6 +26,11 @@ class STTOptions:
     smart_format: bool
     max_sentence_silence: int | None = None
     sample_rate: int = 16000
+
+    # 增加热词表 提供热词识别
+    # 参考url 创建 热词表
+    # https://help.aliyun.com/zh/model-studio/custom-hot-words?spm=a2c4g.11186623.0.0.1a7c2fc2CeNIxu
+    vocabulary_id: str | None = None
     # 过滤语气词
     disfluency_removal_enabled: bool = False
     # 设置是否开启语义断句，默认关闭。
@@ -52,6 +57,7 @@ class STT(stt.STT):
         semantic_punctuation_enabled: bool = False,
         punctuation_prediction_enabled: bool = True,
         inverse_text_normalization_enabled: bool = True,
+        vocabulary_id: str | None = None
     ) -> None:
         super().__init__(
             capabilities=stt.STTCapabilities(
@@ -74,6 +80,7 @@ class STT(stt.STT):
             semantic_punctuation_enabled=semantic_punctuation_enabled,
             punctuation_prediction_enabled=punctuation_prediction_enabled,
             inverse_text_normalization_enabled=inverse_text_normalization_enabled,
+            vocabulary_id=vocabulary_id,
         )
 
     async def _recognize_impl(
@@ -118,6 +125,7 @@ class SpeechStream(stt.SpeechStream):
             punctuation_prediction_enabled=opts.punctuation_prediction_enabled,
             inverse_text_normalization_enabled=opts.inverse_text_normalization_enabled,
             max_sentence_silence=opts.max_sentence_silence,
+            vocabulary_id=opts.vocabulary_id,
             language_hints=[opts.language],
         )
         self._closed = False
@@ -190,3 +198,4 @@ class Callback(RecognitionCallback):
             logger.info(
                 "transcription end", extra={"text": final_event.alternatives[0].text}
             )
+ 
