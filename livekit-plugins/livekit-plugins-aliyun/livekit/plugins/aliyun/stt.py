@@ -57,6 +57,7 @@ class STT(stt.STT):
         semantic_punctuation_enabled: bool = False,
         punctuation_prediction_enabled: bool = True,
         inverse_text_normalization_enabled: bool = True,
+        vocabulary_id: str | None = None
     ) -> None:
         super().__init__(
             capabilities=stt.STTCapabilities(
@@ -79,6 +80,7 @@ class STT(stt.STT):
             semantic_punctuation_enabled=semantic_punctuation_enabled,
             punctuation_prediction_enabled=punctuation_prediction_enabled,
             inverse_text_normalization_enabled=inverse_text_normalization_enabled,
+            vocabulary_id=vocabulary_id,
         )
 
     async def _recognize_impl(
