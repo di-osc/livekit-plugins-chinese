@@ -198,3 +198,4 @@ class Callback(RecognitionCallback):
             logger.info(
                 "transcription end", extra={"text": final_event.alternatives[0].text}
             )
+ 
