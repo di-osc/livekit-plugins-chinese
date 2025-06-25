@@ -354,7 +354,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                         self._opts.get_http_url(),
                         json=data,
                         timeout=aiohttp.ClientTimeout(
-                            total=30,
+                            total=300,
                             sock_connect=self._conn_options.timeout,
                         ),
                         headers=self._opts.get_http_header(),
@@ -376,6 +376,8 @@ class SynthesizeStream(tts.SynthesizeStream):
                                             "tts first response",
                                             extra={"spent": str(first_response_spend)},
                                         )
+                                    # audio hex编码
+                                    audio = bytes.fromhex(audio)
                                     emitter.push(audio)
                     emitter.end_segment()
                     self._pushed_text = self._pushed_text.replace(sentence, "")

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List
 
 import asyncio
-from dashscope.audio.asr import (Recognition, RecognitionCallback, RecognitionResult)
+from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
 
 from livekit import rtc
 from livekit.agents import stt, utils, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
@@ -13,7 +13,6 @@ from livekit.agents.types import (
     NotGivenOr,
 )
 from .log import logger
-
 
 
 @dataclass
@@ -25,26 +24,46 @@ class STTOptions:
     punctuate: bool
     model: str
     smart_format: bool
-    endpointing: int | None
+    max_sentence_silence: int | None = None
     sample_rate: int = 16000
+
+    # 增加热词表 提供热词识别
+    # 参考url 创建 热词表
+    # https://help.aliyun.com/zh/model-studio/custom-hot-words?spm=a2c4g.11186623.0.0.1a7c2fc2CeNIxu
+    vocabulary_id: str | None = None
+    # 过滤语气词
+    disfluency_removal_enabled: bool = False
+    # 设置是否开启语义断句，默认关闭。
+    semantic_punctuation_enabled: bool = False
+    # 设置是否开启标点预测，默认关闭。
+    punctuation_prediction_enabled: bool = True
+    # 设置是否开启文本逆归一化，默认关闭。
+    inverse_text_normalization_enabled: bool = True
 
 
 class STT(stt.STT):
     def __init__(
         self,
         *,
-        language = "zh",
+        language="zh",
         detect_language: bool = False,
         interim_results: bool = True,
         punctuate: bool = True,
         smart_format: bool = True,
         model: str = "paraformer-realtime-v2",
         api_key: str | None = None,
-        min_silence_duration: int = 500
+        max_sentence_silence: int = 500,
+        disfluency_removal_enabled: bool = False,
+        semantic_punctuation_enabled: bool = False,
+        punctuation_prediction_enabled: bool = True,
+        inverse_text_normalization_enabled: bool = True,
+        vocabulary_id: str | None = None
     ) -> None:
-        super().__init__(capabilities=stt.STTCapabilities(
+        super().__init__(
+            capabilities=stt.STTCapabilities(
                 streaming=True, interim_results=interim_results
-            ))
+            )
+        )
         api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
         if api_key is None:
             raise ValueError("DASHSCOPE API key is required")
@@ -56,7 +75,12 @@ class STT(stt.STT):
             punctuate=punctuate,
             model=model,
             smart_format=smart_format,
-            endpointing=min_silence_duration,
+            max_sentence_silence=max_sentence_silence,
+            disfluency_removal_enabled=disfluency_removal_enabled,
+            semantic_punctuation_enabled=semantic_punctuation_enabled,
+            punctuation_prediction_enabled=punctuation_prediction_enabled,
+            inverse_text_normalization_enabled=inverse_text_normalization_enabled,
+            vocabulary_id=vocabulary_id,
         )
 
     async def _recognize_impl(
@@ -71,15 +95,13 @@ class STT(stt.STT):
     def stream(
         self,
         *,
-        language:  str | None = None,
+        language: str | None = None,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> "SpeechStream":
         return SpeechStream(stt=self, opts=self._opts, conn_options=conn_options)
 
 
-
 class SpeechStream(stt.SpeechStream):
-
     def __init__(
         self,
         stt: STT,
@@ -93,18 +115,22 @@ class SpeechStream(stt.SpeechStream):
         self._opts: STTOptions = opts
         self._config = opts
         self._speaking = False
-        self.recognition = Recognition(model=opts.model,
-                          format='pcm',
-                          sample_rate=opts.sample_rate,
-                          callback=Callback(self),
-                          disfluency_removal_enabled=True,
-                          semantic_punctuation_enabled=False,
-                          max_sentence_silence=opts.endpointing,
-                          language_hints=[opts.language])
+        self.recognition = Recognition(
+            model=opts.model,
+            format="pcm",
+            sample_rate=opts.sample_rate,
+            callback=Callback(self),
+            disfluency_removal_enabled=opts.disfluency_removal_enabled,
+            semantic_punctuation_enabled=opts.semantic_punctuation_enabled,
+            punctuation_prediction_enabled=opts.punctuation_prediction_enabled,
+            inverse_text_normalization_enabled=opts.inverse_text_normalization_enabled,
+            max_sentence_silence=opts.max_sentence_silence,
+            vocabulary_id=opts.vocabulary_id,
+            language_hints=[opts.language],
+        )
         self._closed = False
         self._request_id = utils.shortuuid()
         self._reconnect_event = asyncio.Event()
-
 
     async def _run(self) -> None:
         self.recognition.start()
@@ -136,29 +162,31 @@ def live_transcription_to_speech_data(
     language: str,
     data,
 ) -> List[stt.SpeechData]:
-
     return [
-         stt.SpeechData(
+        stt.SpeechData(
             language=language,
-            start_time=data['begin_time'],
-            end_time=data['end_time'],
+            start_time=data["begin_time"],
+            end_time=data["end_time"],
             confidence=0.0,
-            text=data['text'],
+            text=data["text"],
         )
     ]
-    
-    
+
+
 class Callback(RecognitionCallback):
     def __init__(self, _stt: SpeechStream):
         self._stt = _stt
+
     def on_event(self, result: RecognitionResult) -> None:
         sentence = result.get_sentence()
-        dg_alts = live_transcription_to_speech_data(self._stt._config.language, sentence)
+        dg_alts = live_transcription_to_speech_data(
+            self._stt._config.language, sentence
+        )
         if not result.is_sentence_end(sentence):
             interim_event = stt.SpeechEvent(
-                    type=stt.SpeechEventType.INTERIM_TRANSCRIPT,
-                    alternatives=dg_alts,
-                )
+                type=stt.SpeechEventType.INTERIM_TRANSCRIPT,
+                alternatives=dg_alts,
+            )
             self._stt._event_ch.send_nowait(interim_event)
             logger.info("transcription start")
         else:
@@ -167,4 +195,7 @@ class Callback(RecognitionCallback):
                 alternatives=dg_alts,
             )
             self._stt._event_ch.send_nowait(final_event)
-            logger.info("transcription end", extra={"text": final_event.alternatives[0].text})
+            logger.info(
+                "transcription end", extra={"text": final_event.alternatives[0].text}
+            )
+ 

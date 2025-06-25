@@ -90,7 +90,7 @@ class BigModelSTTOptions:
     # audio
     base_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
     format: Literal["pcm", "wav", "ogg"] = "pcm"
-    rate: int = 16000
+    sample_rate: int = 16000
     bits: int = 16
     num_channels: int = 1
     language: str = "zh-CN"
@@ -117,7 +117,7 @@ class BigModelSTTOptions:
             "user": {"uid": uid},
             "audio": {
                 "format": self.format,
-                "rate": self.rate,
+                "rate": self.sample_rate,
                 "bits": self.bits,
                 "channels": self.num_channels,
                 "codec": self.codec,
@@ -297,7 +297,9 @@ class SpeechStream(stt.SpeechStream):
         conn_options: APIConnectOptions,
         http_session: aiohttp.ClientSession,
     ) -> None:
-        super().__init__(stt=stt, conn_options=conn_options, sample_rate=opts.rate)
+        super().__init__(
+            stt=stt, conn_options=conn_options, sample_rate=opts.sample_rate
+        )
 
         self._opts = opts
         self._session = http_session
@@ -316,9 +318,9 @@ class SpeechStream(stt.SpeechStream):
             full_client_request = self._opts.get_ws_query_params(uid=self._request_id)
             await ws.send_bytes(full_client_request)
 
-            samples_100ms = self._opts.rate // 10
+            samples_100ms = self._opts.sample_rate // 10
             audio_bstream = utils.audio.AudioByteStream(
-                sample_rate=self._opts.rate,
+                sample_rate=self._opts.sample_rate,
                 num_channels=self._opts.num_channels,
                 samples_per_channel=samples_100ms,
             )

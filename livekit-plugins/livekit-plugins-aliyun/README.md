@@ -29,7 +29,7 @@ async def entry_point(ctx: JobContext):
 
     session = AgentSession(
         stt=aliyun.STT(model="paraformer-realtime-v2"),
-        tts=aliyun.TTS(),
+        tts=aliyun.TTS(model="cosyvoice-v2", voice="longcheng_v2"),
         llm=aliyun.LLM(model="qwen-plus"),
     )
     
@@ -42,3 +42,11 @@ if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entry_point))
 ```
 
+若需要使用STT热词功能，需要在`STT`插件中配置`vocabulary_id`参数。
+```python
+    session = AgentSession(
+        stt=aliyun.STT(model="paraformer-realtime-v2", vocabulary_id="your_vocabulary_id"),
+        tts=aliyun.TTS(model="cosyvoice-v2", voice="longcheng_v2"),
+        llm=aliyun.LLM(model="qwen-plus"),
+    )
+```
