@@ -219,13 +219,11 @@ class SynthesizeStream(tts.SynthesizeStream):
                         header = msg_json["header"]
                         if "event" in header:
                             event = header["event"]
-
                             if event == "task-finished":
                                 break
-
                             if event == "task-failed":
-                                error_msg = msg_json.get("error_message", "未知错误")
-                                logger.error(f"任务失败: {error_msg}")
+                                logger.error(f"tts task failed: {msg_json}")
+                                break
 
         splitter = TextStreamSentencizer()
         is_first_sentence = True
