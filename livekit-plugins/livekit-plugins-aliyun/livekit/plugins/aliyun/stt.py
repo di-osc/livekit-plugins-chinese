@@ -24,7 +24,7 @@ class STTOptions:
     punctuate: bool
     model: str
     smart_format: bool
-    max_sentence_silence: int | None = None
+    max_sentence_silence: int = 500
     sample_rate: int = 16000
 
     # 增加热词表 提供热词识别
