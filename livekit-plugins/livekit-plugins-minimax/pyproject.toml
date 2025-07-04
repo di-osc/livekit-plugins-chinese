@@ -9,7 +9,7 @@ authors = [
 keywords = ["webrtc", "realtime", "audio", "video", "livekit"]
 requires-python = ">=3.9"
 dependencies = [
-    "livekit-agents>=1.1.2",
+    "livekit-agents>=1.1.5",
     "osc-data>=0.1.7.post0",
     "pydantic",
     "openai",
