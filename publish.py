@@ -9,6 +9,8 @@ load_dotenv()
 
 def run(version: str):
     dist_dir = Path("dist")
+    if not dist_dir.exists():
+        dist_dir.mkdir()
     for f in dist_dir.iterdir():
         f.unlink()
     plugins = Path("livekit-plugins")
