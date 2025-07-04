@@ -11,7 +11,7 @@ requires-python = ">=3.9"
 dependencies = [
     "livekit-agents>=1.1.5",
     "openai>=1.75.0",
-    "osc-data>=0.1.7",
+    "osc-data>=0.2.2",
     "pydantic",
 ]
 
