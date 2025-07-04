@@ -290,7 +290,6 @@ class SpeechStream(stt.SpeechStream):
     def _process_stream_event(self, data: dict) -> None:
         event_type = data["header"]["event"]
         if event_type == "result-generated":
-            print(data)
             output = data["payload"]["output"]["sentence"]
             is_sentence_end = output["sentence_end"]
             start_time = output["begin_time"]
