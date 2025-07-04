@@ -230,9 +230,9 @@ class SpeechStream(stt.SpeechStream):
                 for frame in frames:
                     await ws.send_bytes(frame.data.tobytes())
 
-                    if has_ended:
-                        await ws.send_json(self._opts.get_finish_task_params(task_id))
-                        has_ended = False
+                if has_ended:
+                    await ws.send_json(self._opts.get_finish_task_params(task_id))
+                    has_ended = False
 
         @utils.log_exceptions(logger=logger)
         async def recv_task(ws: aiohttp.ClientWebSocketResponse):
@@ -290,6 +290,7 @@ class SpeechStream(stt.SpeechStream):
     def _process_stream_event(self, data: dict) -> None:
         event_type = data["header"]["event"]
         if event_type == "result-generated":
+            print(data)
             output = data["payload"]["output"]["sentence"]
             is_sentence_end = output["sentence_end"]
             start_time = output["begin_time"]
