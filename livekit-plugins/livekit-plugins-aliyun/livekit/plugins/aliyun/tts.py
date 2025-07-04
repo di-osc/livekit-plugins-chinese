@@ -225,7 +225,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                                 logger.error(f"tts task failed: {msg_json}")
                                 break
 
-        splitter = TextStreamSentencizer()
+        splitter = TextStreamSentencizer(remove_emoji=True)
         is_first_sentence = True
         start_time = time.perf_counter()
         async for token in self._input_ch:
