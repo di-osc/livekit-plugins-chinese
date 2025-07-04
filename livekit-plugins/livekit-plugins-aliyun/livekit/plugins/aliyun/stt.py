@@ -72,7 +72,7 @@ class STTOptions:
                 "function": "recognition",
                 "model": self.model,
                 "parameters": {
-                    "format": "pcm",
+                    "format": "wav",
                     "sample_rate": self.sample_rate,
                     "vocabulary_id": self.vocabulary_id,
                     "disfluency_removal_enabled": self.disfluency_removal_enabled,
