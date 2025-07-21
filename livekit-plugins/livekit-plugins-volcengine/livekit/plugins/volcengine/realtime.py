@@ -454,7 +454,7 @@ class RealtimeSession(
                     msg = ev.model_dump(
                         by_alias=True, exclude_unset=True, exclude_defaults=False
                     )
-                    self.emit("openai_client_event_queued", msg)
+                    self.emit("volcengine_client_event_queued", msg)
                     await ws_conn.send_str(json.dumps(msg))
             except Exception as e:
                 self._remote_chat_ctx = (
@@ -549,13 +549,28 @@ class RealtimeSession(
         async def _send_task() -> None:
             nonlocal closing
             async for msg in self._msg_ch:
+                print(msg)
                 try:
                     if isinstance(msg, BaseModel):
                         msg = msg.model_dump(
                             by_alias=True, exclude_unset=True, exclude_defaults=False
                         )
-
-                    self.emit("openai_client_event_queued", msg)
+                    task_request = bytearray(
+                        generate_header(
+                            message_type=CLIENT_AUDIO_ONLY_REQUEST,
+                            serial_method=NO_SERIALIZATION,
+                        )
+                    )
+                    task_request.extend(int(200).to_bytes(4, "big"))
+                    task_request.extend((len(self.session_id)).to_bytes(4, "big"))
+                    task_request.extend(str.encode(self.session_id))
+                    payload_bytes = gzip.compress(audio)
+                    task_request.extend(
+                        (len(payload_bytes)).to_bytes(4, "big")
+                    )  # payload size(4 bytes)
+                    task_request.extend(payload_bytes)
+                    await self.ws.send(task_request)
+                    self.emit("volcengine_client_event_queued", msg)
                     await ws_conn.send_str(json.dumps(msg))
 
                 except Exception:
@@ -588,16 +603,9 @@ class RealtimeSession(
 
                 # emit the raw json dictionary instead of the BaseModel because different
                 # providers can have different event types that are not part of the OpenAI Realtime API  # noqa: E501
-                self.emit("openai_server_event_received", event)
+                self.emit("volcengine_server_event_received", event)
 
                 try:
-                    if lk_oai_debug:
-                        event_copy = event.copy()
-                        if event_copy["type"] == "response.audio.delta":
-                            event_copy = {**event_copy, "delta": "..."}
-
-                        logger.debug(f"<<< {event_copy}")
-
                     if event["type"] == "input_audio_buffer.speech_started":
                         self._handle_input_audio_buffer_speech_started(
                             InputAudioBufferSpeechStartedEvent.construct(**event)
@@ -876,75 +884,6 @@ class RealtimeSession(
             _create_item(previous_msg_id, msg_id)
 
         return events
-
-    async def update_tools(
-        self, tools: list[llm.FunctionTool | llm.RawFunctionTool]
-    ) -> None:
-        async with self._update_fnc_ctx_lock:
-            ev = self._create_tools_update_event(tools)
-            self.send_event(ev)
-
-            assert ev.session.tools is not None
-            retained_tool_names = {
-                name for t in ev.session.tools if (name := t.name) is not None
-            }
-            retained_tools = [
-                tool
-                for tool in tools
-                if (
-                    is_function_tool(tool)
-                    and get_function_info(tool).name in retained_tool_names
-                )
-                or (
-                    is_raw_function_tool(tool)
-                    and get_raw_function_info(tool).name in retained_tool_names
-                )
-            ]
-            self._tools = llm.ToolContext(retained_tools)
-
-    def _create_tools_update_event(
-        self, tools: list[llm.FunctionTool | llm.RawFunctionTool]
-    ) -> SessionUpdateEvent:
-        oai_tools: list[session_update_event.SessionTool] = []
-        retained_tools: list[llm.FunctionTool | llm.RawFunctionTool] = []
-
-        for tool in tools:
-            if is_function_tool(tool):
-                tool_desc = llm.utils.build_legacy_openai_schema(
-                    tool, internally_tagged=True
-                )
-            elif is_raw_function_tool(tool):
-                tool_info = get_raw_function_info(tool)
-                tool_desc = tool_info.raw_schema
-                tool_desc["type"] = "function"  # internally tagged
-            else:
-                logger.error(
-                    "OpenAI Realtime API doesn't support this tool type",
-                    extra={"tool": tool},
-                )
-                continue
-
-            try:
-                session_tool = session_update_event.SessionTool.model_validate(
-                    tool_desc
-                )
-                oai_tools.append(session_tool)
-                retained_tools.append(tool)
-            except ValidationError:
-                logger.error(
-                    "OpenAI Realtime API doesn't support this tool",
-                    extra={"tool": tool_desc},
-                )
-                continue
-
-        return SessionUpdateEvent(
-            type="session.update",
-            session=session_update_event.Session.model_construct(
-                model=self._realtime_model._opts.model,
-                tools=oai_tools,
-            ),
-            event_id=utils.shortuuid("tools_update_"),
-        )
 
     async def update_instructions(self, instructions: str) -> None:
         event_id = utils.shortuuid("instructions_update_")
