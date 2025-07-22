@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import aiohttp
 from pydantic import BaseModel, ValidationError
+import numpy as np
 
 from livekit import rtc
 from livekit.agents import APIConnectionError, APIError, io, llm, utils
@@ -379,7 +380,7 @@ class RealtimeSession(
         super().__init__(realtime_model)
         self._realtime_model: RealtimeModel = realtime_model
         self._tools = llm.ToolContext.empty()
-        self._msg_ch = utils.aio.Chan[Union[RealtimeClientEvent, dict[str, Any]]]()
+        self._msg_ch = utils.aio.Chan[rtc.AudioFrame]()
         self._input_resampler: rtc.AudioResampler | None = None
         self.session_id = str(uuid.uuid4())
 
@@ -387,7 +388,6 @@ class RealtimeSession(
         self._main_atask = asyncio.create_task(
             self._main_task(), name="RealtimeSession._main_task"
         )
-        self.send_event(self._create_session_update_event())
 
         self._response_created_futures: dict[
             str, asyncio.Future[llm.GenerationCreatedEvent]
@@ -396,7 +396,9 @@ class RealtimeSession(
         self._item_create_future: dict[str, asyncio.Future] = {}
 
         self._current_generation: _ResponseGeneration | None = None
+        self._current_item: _MessageGeneration | None = None
         self._remote_chat_ctx = llm.remote_chat_context.RemoteChatContext()
+        self._is_opening = True
 
         self._update_chat_ctx_lock = asyncio.Lock()
         self._update_fnc_ctx_lock = asyncio.Lock()
@@ -417,105 +419,27 @@ class RealtimeSession(
 
     @utils.log_exceptions(logger=logger)
     async def _main_task(self) -> None:
-        logger.info("run realtime main task")
-        num_retries: int = 0
-        max_retries = self._realtime_model._opts.conn_options.max_retry
+        logger.info("start realtime main task")
+        # while not self._msg_ch.closed:
+        ws_conn = await self._create_ws_conn()
 
-        async def _reconnect() -> None:
-            logger.debug(
-                "reconnecting to Volcengine Realtime API",
-                extra={
-                    "max_session_duration": self._realtime_model._opts.max_session_duration
-                },
-            )
+        try:
+            await self._run_ws(ws_conn)
 
-            events: list[RealtimeClientEvent] = []
-
-            # options and instructions
-            events.append(self._create_session_update_event())
-
-            # tools
-            tools = list(self._tools.function_tools.values())
-            if tools:
-                events.append(self._create_tools_update_event(tools))
-
-            # chat context
-            chat_ctx = self.chat_ctx.copy(
-                exclude_function_call=True,
-                exclude_instructions=True,
-                exclude_empty_message=True,
-            )
-            old_chat_ctx_copy = copy.deepcopy(self._remote_chat_ctx)
-            self._remote_chat_ctx = llm.remote_chat_context.RemoteChatContext()
-            events.extend(self._create_update_chat_ctx_events(chat_ctx))
-
-            try:
-                for ev in events:
-                    msg = ev.model_dump(
-                        by_alias=True, exclude_unset=True, exclude_defaults=False
-                    )
-                    self.emit("volcengine_client_event_queued", msg)
-                    await ws_conn.send_str(json.dumps(msg))
-            except Exception as e:
-                self._remote_chat_ctx = (
-                    old_chat_ctx_copy  # restore the old chat context
-                )
-                raise APIConnectionError(
-                    message=(
-                        "Failed to send message to OpenAI Realtime API during session re-connection"
-                    ),
-                ) from e
-
-            logger.debug("reconnected to OpenAI Realtime API")
-            self.emit("session_reconnected", llm.RealtimeSessionReconnectedEvent())
-
-        reconnecting = False
-        while not self._msg_ch.closed:
-            ws_conn = await self._create_ws_conn()
-
-            try:
-                if reconnecting:
-                    await _reconnect()
-                    num_retries = 0  # reset the retry counter
-                await self._run_ws(ws_conn)
-
-            except APIError as e:
-                if max_retries == 0 or not e.retryable:
-                    self._emit_error(e, recoverable=False)
-                    raise
-                elif num_retries == max_retries:
-                    self._emit_error(e, recoverable=False)
-                    raise APIConnectionError(
-                        f"OpenAI Realtime API connection failed after {num_retries} attempts",
-                    ) from e
-                else:
-                    self._emit_error(e, recoverable=True)
-
-                    retry_interval = (
-                        self._realtime_model._opts.conn_options._interval_for_retry(
-                            num_retries
-                        )
-                    )
-                    logger.warning(
-                        f"OpenAI Realtime API connection failed, retrying in {retry_interval}s",
-                        exc_info=e,
-                        extra={"attempt": num_retries, "max_retries": max_retries},
-                    )
-                    await asyncio.sleep(retry_interval)
-                num_retries += 1
-
-            except Exception as e:
-                self._emit_error(e, recoverable=False)
-                raise
-
-            reconnecting = True
+        except Exception as e:
+            logger.error("realtime main task error", exc_info=e)
+            self._emit_error(e, recoverable=False)
+            raise e
+        logger.info("realtime main task break")
+        # break
 
     async def _create_ws_conn(self) -> aiohttp.ClientWebSocketResponse:
         headers = self._realtime_model._opts.get_ws_headers()
         url = self._realtime_model._opts.ws_url
         return await asyncio.wait_for(
             self._realtime_model._ensure_http_session().ws_connect(
-                url=url, headers=headers
+                url=url,
+                headers=headers,
             ),
             self._realtime_model._opts.conn_options.timeout,
         )
@@ -530,7 +454,7 @@ class RealtimeSession(
         start_connection_request.extend(payload_bytes)
         await ws_conn.send_bytes(start_connection_request)
         response = await ws_conn.receive_bytes()
-        logger.info(f"StartConnection response: {parse_response(response)}")
+        logger.info(f"startConnection response")
 
         request_params = self._realtime_model._opts.get_start_session_reqs()
         payload_bytes = str.encode(json.dumps(request_params))
@@ -543,18 +467,28 @@ class RealtimeSession(
         start_session_request.extend(payload_bytes)
         await ws_conn.send_bytes(start_session_request)
         response = await ws_conn.receive_bytes()
-        logger.info(f"StartSession response: {parse_response(response)}")
+        logger.info(f"startSession response")
+
+        payload = {
+            "content": self._realtime_model._opts.opening,
+        }
+        hello_request = bytearray(generate_header())
+        hello_request.extend(int(300).to_bytes(4, "big"))
+        payload_bytes = str.encode(json.dumps(payload))
+        payload_bytes = gzip.compress(payload_bytes)
+        hello_request.extend((len(self.session_id)).to_bytes(4, "big"))
+        hello_request.extend(str.encode(self.session_id))
+        hello_request.extend((len(payload_bytes)).to_bytes(4, "big"))
+        hello_request.extend(payload_bytes)
+        await ws_conn.send_bytes(hello_request)
+        self._is_opening = True
+        logger.info(f"send hello request")
 
         @utils.log_exceptions(logger=logger)
         async def _send_task() -> None:
             nonlocal closing
-            async for msg in self._msg_ch:
-                print(msg)
+            async for frame in self._msg_ch:
                 try:
-                    if isinstance(msg, BaseModel):
-                        msg = msg.model_dump(
-                            by_alias=True, exclude_unset=True, exclude_defaults=False
-                        )
                     task_request = bytearray(
                         generate_header(
                             message_type=CLIENT_AUDIO_ONLY_REQUEST,
@@ -564,16 +498,15 @@ class RealtimeSession(
                     task_request.extend(int(200).to_bytes(4, "big"))
                     task_request.extend((len(self.session_id)).to_bytes(4, "big"))
                     task_request.extend(str.encode(self.session_id))
-                    payload_bytes = gzip.compress(audio)
+                    payload_bytes = gzip.compress(frame.data.tobytes())
                     task_request.extend(
                         (len(payload_bytes)).to_bytes(4, "big")
                     )  # payload size(4 bytes)
                     task_request.extend(payload_bytes)
-                    await self.ws.send(task_request)
-                    self.emit("volcengine_client_event_queued", msg)
-                    await ws_conn.send_str(json.dumps(msg))
+                    await ws_conn.send_bytes(task_request)
 
                 except Exception:
+                    logger.error("send task error", exc_info=True)
                     break
 
             closing = True
@@ -583,121 +516,162 @@ class RealtimeSession(
         async def _recv_task() -> None:
             while True:
                 msg = await ws_conn.receive()
-                if msg.type in (
-                    aiohttp.WSMsgType.CLOSED,
-                    aiohttp.WSMsgType.CLOSE,
-                    aiohttp.WSMsgType.CLOSING,
-                ):
-                    if closing:  # closing is expected, see _send_task
-                        return
+                if msg.data is None:
+                    continue
+                response = parse_response(msg.data)
+                event = response.get("event")
+                logger.info(f"response event {event}")
+                if event == 450:  # ASRInfo
+                    self.emit("input_speech_started", llm.InputSpeechStartedEvent())
+                elif event == 451:  # ASRResponse
+                    response = response["payload_msg"]
+                    transcription = response["results"][0]["alternatives"][0]["text"]
+                    is_final = not response["results"][0]["is_interim"]
+                    if is_final:
+                        item_id = utils.shortuuid()
+                        self.emit(
+                            "input_audio_transcription_completed",
+                            llm.InputTranscriptionCompleted(
+                                item_id=item_id,
+                                transcript=transcription,
+                                is_final=True,
+                            ),
+                        )
+                        if self._current_generation is None:
+                            self._current_generation = _ResponseGeneration(
+                                message_ch=utils.aio.Chan(),
+                                function_ch=utils.aio.Chan(),
+                                messages={},
+                                _created_timestamp=time.time(),
+                                _done_fut=asyncio.Future(),
+                            )
 
-                    # this will trigger a reconnection
-                    raise APIConnectionError(
-                        message="OpenAI S2S connection closed unexpectedly"
+                            generation_ev = llm.GenerationCreatedEvent(
+                                message_stream=self._current_generation.message_ch,
+                                function_stream=self._current_generation.function_ch,
+                                user_initiated=False,
+                            )
+
+                            self.emit("generation_created", generation_ev)
+                        self._current_item = _MessageGeneration(
+                            message_id=item_id,
+                            text_ch=utils.aio.Chan(),
+                            audio_ch=utils.aio.Chan(),
+                        )
+                        self._current_generation.message_ch.send_nowait(
+                            self._current_item
+                        )
+
+                elif event == 459:  # ASREnd
+                    self.emit(
+                        "input_speech_stopped",
+                        llm.InputSpeechStoppedEvent(user_transcription_enabled=False),
                     )
 
-                if msg.type != aiohttp.WSMsgType.TEXT:
-                    continue
+                elif event == 352:  # TTSResponse
+                    audio_bytes = response[
+                        "payload_msg"
+                    ]  # 原始为float32，需要转为int16
+                    audio = np.frombuffer(audio_bytes, dtype=np.float32)
+                    audio = (audio * 32767).astype(np.int16)
+                    audio_bytes = audio.tobytes()
+                    if self._current_generation is None:
+                        self._current_generation = _ResponseGeneration(
+                            message_ch=utils.aio.Chan(),
+                            function_ch=utils.aio.Chan(),
+                            messages={},
+                            _created_timestamp=time.time(),
+                            _done_fut=asyncio.Future(),
+                        )
 
-                event = json.loads(msg.data)
+                        generation_ev = llm.GenerationCreatedEvent(
+                            message_stream=self._current_generation.message_ch,
+                            function_stream=self._current_generation.function_ch,
+                            user_initiated=False,
+                        )
 
-                # emit the raw json dictionary instead of the BaseModel because different
-                # providers can have different event types that are not part of the OpenAI Realtime API  # noqa: E501
-                self.emit("volcengine_server_event_received", event)
+                        self.emit("generation_created", generation_ev)
+                    if self._current_item is None:
+                        item_id = utils.shortuuid()
+                        self._current_item = _MessageGeneration(
+                            message_id=item_id,
+                            text_ch=utils.aio.Chan(),
+                            audio_ch=utils.aio.Chan(),
+                        )
 
-                try:
-                    if event["type"] == "input_audio_buffer.speech_started":
-                        self._handle_input_audio_buffer_speech_started(
-                            InputAudioBufferSpeechStartedEvent.construct(**event)
-                        )
-                    elif event["type"] == "input_audio_buffer.speech_stopped":
-                        self._handle_input_audio_buffer_speech_stopped(
-                            InputAudioBufferSpeechStoppedEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.created":
-                        self._handle_response_created(
-                            ResponseCreatedEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.output_item.added":
-                        self._handle_response_output_item_added(
-                            ResponseOutputItemAddedEvent.construct(**event)
-                        )
-                    elif event["type"] == "conversation.item.created":
-                        self._handle_conversion_item_created(
-                            ConversationItemCreatedEvent.construct(**event)
-                        )
-                    elif event["type"] == "conversation.item.deleted":
-                        self._handle_conversion_item_deleted(
-                            ConversationItemDeletedEvent.construct(**event)
-                        )
-                    elif (
-                        event["type"]
-                        == "conversation.item.input_audio_transcription.completed"
-                    ):
-                        self._handle_conversion_item_input_audio_transcription_completed(
-                            ConversationItemInputAudioTranscriptionCompletedEvent.construct(
-                                **event
+                        self._current_generation.message_ch.send_nowait(
+                            llm.MessageGeneration(
+                                message_id=item_id,
+                                text_stream=self._current_item.text_ch,
+                                audio_stream=self._current_item.audio_ch,
                             )
                         )
-                    elif (
-                        event["type"]
-                        == "conversation.item.input_audio_transcription.failed"
-                    ):
-                        self._handle_conversion_item_input_audio_transcription_failed(
-                            ConversationItemInputAudioTranscriptionFailedEvent.construct(
-                                **event
+                    self._current_item.audio_ch.send_nowait(
+                        rtc.AudioFrame(
+                            data=audio_bytes,
+                            sample_rate=self._realtime_model._opts.sample_rate,
+                            num_channels=1,
+                            samples_per_channel=len(audio_bytes) // 2,
+                        )
+                    )
+                elif event == 359:
+                    self._current_item.audio_ch.close()
+                    if self._is_opening:
+                        self._current_item.text_ch.send_nowait(
+                            self._realtime_model._opts.opening
+                        )
+                        self._current_item.text_ch.close()
+                        self._is_opening = False
+                elif event == 550:  # 模型回复的文本内容
+                    if self._current_generation is None:
+                        self._current_generation = _ResponseGeneration(
+                            message_ch=utils.aio.Chan(),
+                            function_ch=utils.aio.Chan(),
+                            messages={},
+                            _created_timestamp=time.time(),
+                            _done_fut=asyncio.Future(),
+                        )
+
+                        generation_ev = llm.GenerationCreatedEvent(
+                            message_stream=self._current_generation.message_ch,
+                            function_stream=self._current_generation.function_ch,
+                            user_initiated=False,
+                        )
+
+                        self.emit("generation_created", generation_ev)
+                    if self._current_item is None:
+                        item_id = utils.shortuuid()
+                        self._current_item = _MessageGeneration(
+                            message_id=item_id,
+                            text_ch=utils.aio.Chan(),
+                            audio_ch=utils.aio.Chan(),
+                        )
+
+                        self._current_generation.message_ch.send_nowait(
+                            llm.MessageGeneration(
+                                message_id=item_id,
+                                text_stream=self._current_item.text_ch,
+                                audio_stream=self._current_item.audio_ch,
                             )
                         )
-                    elif event["type"] == "response.content_part.done":
-                        self._handle_response_content_part_done(
-                            ResponseContentPartDoneEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.text.delta":
-                        self._handle_response_text_delta(
-                            ResponseTextDeltaEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.text.done":
-                        self._handle_response_text_done(
-                            ResponseTextDoneEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.audio_transcript.delta":
-                        self._handle_response_audio_transcript_delta(event)
-                    elif event["type"] == "response.audio.delta":
-                        self._handle_response_audio_delta(
-                            ResponseAudioDeltaEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.audio_transcript.done":
-                        self._handle_response_audio_transcript_done(
-                            ResponseAudioTranscriptDoneEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.audio.done":
-                        self._handle_response_audio_done(
-                            ResponseAudioDoneEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.output_item.done":
-                        self._handle_response_output_item_done(
-                            ResponseOutputItemDoneEvent.construct(**event)
-                        )
-                    elif event["type"] == "response.done":
-                        self._handle_response_done(ResponseDoneEvent.construct(**event))
-                    elif event["type"] == "error":
-                        self._handle_error(ErrorEvent.construct(**event))
-                except Exception:
-                    if event["type"] == "response.audio.delta":
-                        event["delta"] = event["delta"][:10] + "..."
-                    logger.exception("failed to handle event", extra={"event": event})
+                    text = response["payload_msg"]["content"]
+                    self._current_item.text_ch.send_nowait(text)
+                elif event == 559:  # 模型回复文本结束事件
+                    self._current_item.text_ch.close()
+                else:
+                    logger.info(f"unknown event {event}")
 
         tasks = [
             asyncio.create_task(_recv_task(), name="_recv_task"),
             asyncio.create_task(_send_task(), name="_send_task"),
         ]
         wait_reconnect_task: asyncio.Task | None = None
-        if self._realtime_model._opts.max_session_duration is not None:
-            wait_reconnect_task = asyncio.create_task(
-                asyncio.sleep(self._realtime_model._opts.max_session_duration),
-                name="_timeout_task",
-            )
-            tasks.append(wait_reconnect_task)
+        # if self._realtime_model._opts.max_session_duration is not None:
+        #     wait_reconnect_task = asyncio.create_task(
+        #         asyncio.sleep(self._realtime_model._opts.max_session_duration),
+        #         name="_timeout_task",
+        #     )
+        #     tasks.append(wait_reconnect_task)
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
@@ -706,90 +680,12 @@ class RealtimeSession(
                 if task != wait_reconnect_task:
                     task.result()
 
-            if (
-                wait_reconnect_task
-                and wait_reconnect_task in done
-                and self._current_generation
-            ):
-                # wait for the current generation to complete before reconnecting
-                await self._current_generation._done_fut
-
         finally:
             await utils.aio.cancel_and_wait(*tasks)
             await ws_conn.close()
 
     def _create_session_update_event(self) -> SessionUpdateEvent:
-        input_audio_transcription_opts = (
-            self._realtime_model._opts.input_audio_transcription
-        )
-        input_audio_transcription = (
-            session_update_event.SessionInputAudioTranscription.model_validate(
-                input_audio_transcription_opts.model_dump(
-                    by_alias=True,
-                    exclude_unset=True,
-                    exclude_defaults=True,
-                )
-            )
-            if input_audio_transcription_opts
-            else None
-        )
-
-        turn_detection_opts = self._realtime_model._opts.turn_detection
-        turn_detection = (
-            session_update_event.SessionTurnDetection.model_validate(
-                turn_detection_opts.model_dump(
-                    by_alias=True,
-                    exclude_unset=True,
-                    exclude_defaults=True,
-                )
-            )
-            if turn_detection_opts
-            else None
-        )
-
-        tracing_opts = self._realtime_model._opts.tracing
-        if isinstance(tracing_opts, TracingTracingConfiguration):
-            tracing: session_update_event.SessionTracing | None = (
-                session_update_event.SessionTracingTracingConfiguration.model_validate(
-                    tracing_opts.model_dump(
-                        by_alias=True,
-                        exclude_unset=True,
-                        exclude_defaults=True,
-                    )
-                )
-            )
-        else:
-            tracing = tracing_opts
-
-        kwargs: dict[str, Any] = {
-            "model": self._realtime_model._opts.model,
-            "voice": self._realtime_model._opts.voice,
-            "input_audio_format": "pcm16",
-            "output_audio_format": "pcm16",
-            "modalities": self._realtime_model._opts.modalities,
-            "turn_detection": turn_detection,
-            "input_audio_transcription": input_audio_transcription,
-            "input_audio_noise_reduction": self._realtime_model._opts.input_audio_noise_reduction,
-            "temperature": self._realtime_model._opts.temperature,
-            "tool_choice": _to_oai_tool_choice(self._realtime_model._opts.tool_choice),
-        }
-        if self._instructions is not None:
-            kwargs["instructions"] = self._instructions
-
-        if self._realtime_model._opts.speed is not None:
-            kwargs["speed"] = self._realtime_model._opts.speed
-
-        if tracing:
-            kwargs["tracing"] = tracing
-
-        # initial session update
-        return SessionUpdateEvent(
-            type="session.update",
-            # Using model_construct since OpenAI restricts voices to those defined in the BaseModel.  # noqa: E501
-            # Other providers support different voices, so we need to accommodate that.
-            session=session_update_event.Session.model_construct(**kwargs),
-            event_id=utils.shortuuid("session_update_"),
-        )
+        pass
 
     @property
     def chat_ctx(self) -> llm.ChatContext:
@@ -816,6 +712,9 @@ class RealtimeSession(
         speed: NotGivenOr[float] = NOT_GIVEN,
         tracing: NotGivenOr[Tracing | None] = NOT_GIVEN,
     ) -> None:
+        pass
+
+    async def update_tools(self, tools):
         pass
 
     async def update_chat_ctx(self, chat_ctx: llm.ChatContext) -> None:
@@ -886,30 +785,16 @@ class RealtimeSession(
         return events
 
     async def update_instructions(self, instructions: str) -> None:
-        event_id = utils.shortuuid("instructions_update_")
+        # event_id = utils.shortuuid("instructions_update_")
         # f = asyncio.Future()
         # self._response_futures[event_id] = f
-        self.send_event(
-            SessionUpdateEvent(
-                type="session.update",
-                session=session_update_event.Session.model_construct(
-                    instructions=instructions
-                ),
-                event_id=event_id,
-            )
-        )
         self._instructions = instructions
 
     def push_audio(self, frame: rtc.AudioFrame) -> None:
         for f in self._resample_audio(frame):
             data = f.data.tobytes()
             for nf in self._bstream.write(data):
-                self.send_event(
-                    InputAudioBufferAppendEvent(
-                        type="input_audio_buffer.append",
-                        audio=base64.b64encode(nf.data).decode("utf-8"),
-                    )
-                )
+                self.send_event(nf)
                 self._pushed_duration_s += nf.duration
 
     def push_video(self, frame: rtc.VideoFrame) -> None:
@@ -917,31 +802,18 @@ class RealtimeSession(
 
     def commit_audio(self) -> None:
         if self._pushed_duration_s > 0.1:  # OpenAI requires at least 100ms of audio
-            self.send_event(
-                InputAudioBufferCommitEvent(type="input_audio_buffer.commit")
-            )
             self._pushed_duration_s = 0
 
     def clear_audio(self) -> None:
-        self.send_event(InputAudioBufferClearEvent(type="input_audio_buffer.clear"))
         self._pushed_duration_s = 0
 
     def generate_reply(
         self, *, instructions: NotGivenOr[str] = NOT_GIVEN
     ) -> asyncio.Future[llm.GenerationCreatedEvent]:
+        """仅文字输入"""
         event_id = utils.shortuuid("response_create_")
         fut = asyncio.Future[llm.GenerationCreatedEvent]()
         self._response_created_futures[event_id] = fut
-        self.send_event(
-            ResponseCreateEvent(
-                type="response.create",
-                event_id=event_id,
-                response=Response(
-                    instructions=instructions or None,
-                    metadata={"client_event_id": event_id},
-                ),
-            )
-        )
 
         def _on_timeout() -> None:
             if fut and not fut.done():
@@ -952,7 +824,7 @@ class RealtimeSession(
         return fut
 
     def interrupt(self) -> None:
-        self.send_event(ResponseCancelEvent(type="response.cancel"))
+        pass
 
     def truncate(
         self,
@@ -962,14 +834,7 @@ class RealtimeSession(
         audio_transcript: NotGivenOr[str] = NOT_GIVEN,
     ) -> None:
         if self._realtime_model.capabilities.audio_output:
-            self.send_event(
-                ConversationItemTruncateEvent(
-                    type="conversation.item.truncate",
-                    content_index=0,
-                    item_id=message_id,
-                    audio_end_ms=audio_end_ms,
-                )
-            )
+            pass
         elif utils.is_given(audio_transcript):
             # sync the forwarded text to the remote chat ctx
             chat_ctx = self.chat_ctx.copy()
@@ -994,12 +859,13 @@ class RealtimeSession(
                 self._input_resampler = None
 
         if self._input_resampler is None and (
-            frame.sample_rate != SAMPLE_RATE or frame.num_channels != NUM_CHANNELS
+            frame.sample_rate != self._realtime_model._opts.sample_rate
+            or frame.num_channels != self._realtime_model._opts.num_channels
         ):
             self._input_resampler = rtc.AudioResampler(
                 input_rate=frame.sample_rate,
-                output_rate=SAMPLE_RATE,
-                num_channels=NUM_CHANNELS,
+                output_rate=self._realtime_model._opts.sample_rate,
+                num_channels=self._realtime_model._opts.num_channels,
             )
 
         if self._input_resampler:
@@ -1007,51 +873,6 @@ class RealtimeSession(
             yield from self._input_resampler.push(frame)
         else:
             yield frame
-
-    def _handle_input_audio_buffer_speech_started(
-        self, _: InputAudioBufferSpeechStartedEvent
-    ) -> None:
-        self.emit("input_speech_started", llm.InputSpeechStartedEvent())
-
-    def _handle_input_audio_buffer_speech_stopped(
-        self, _: InputAudioBufferSpeechStoppedEvent
-    ) -> None:
-        user_transcription_enabled = (
-            self._realtime_model._opts.input_audio_transcription is not None
-        )
-        self.emit(
-            "input_speech_stopped",
-            llm.InputSpeechStoppedEvent(
-                user_transcription_enabled=user_transcription_enabled
-            ),
-        )
-
-    def _handle_response_created(self, event: ResponseCreatedEvent) -> None:
-        assert event.response.id is not None, "response.id is None"
-
-        self._current_generation = _ResponseGeneration(
-            message_ch=utils.aio.Chan(),
-            function_ch=utils.aio.Chan(),
-            messages={},
-            _created_timestamp=time.time(),
-            _done_fut=asyncio.Future(),
-        )
-
-        generation_ev = llm.GenerationCreatedEvent(
-            message_stream=self._current_generation.message_ch,
-            function_stream=self._current_generation.function_ch,
-            user_initiated=False,
-        )
-
-        if (
-            isinstance(event.response.metadata, dict)
-            and (client_event_id := event.response.metadata.get("client_event_id"))
-            and (fut := self._response_created_futures.pop(client_event_id, None))
-        ):
-            generation_ev.user_initiated = True
-            fut.set_result(generation_ev)
-
-        self.emit("generation_created", generation_ev)
 
     def _handle_response_output_item_added(
         self, event: ResponseOutputItemAddedEvent
@@ -1077,22 +898,6 @@ class RealtimeSession(
                 )
             )
             self._current_generation.messages[item_id] = item_generation
-
-    def _handle_response_content_part_done(
-        self, event: ResponseContentPartDoneEvent
-    ) -> None:
-        if event.part.type == "text" and self._realtime_model.capabilities.audio_output:
-            logger.error(
-                "Text response received from OpenAI Realtime API in audio modality. "
-                "This usually happens when text chat context is synced to the API. "
-                "Try to use text modality with TTS instead."
-            )
-            self._emit_error(
-                llm.RealtimeError(
-                    "Text response received from OpenAI Realtime API in audio modality."
-                ),
-                recoverable=False,
-            )
 
     def _handle_conversion_item_created(
         self, event: ConversationItemCreatedEvent
@@ -1126,22 +931,6 @@ class RealtimeSession(
         if fut := self._item_delete_future.pop(event.item_id, None):
             fut.set_result(None)
 
-    def _handle_conversion_item_input_audio_transcription_completed(
-        self, event: ConversationItemInputAudioTranscriptionCompletedEvent
-    ) -> None:
-        if remote_item := self._remote_chat_ctx.get(event.item_id):
-            assert isinstance(remote_item.item, llm.ChatMessage)
-            remote_item.item.content.append(event.transcript)
-
-        self.emit(
-            "input_audio_transcription_completed",
-            llm.InputTranscriptionCompleted(
-                item_id=event.item_id,
-                transcript=event.transcript,
-                is_final=True,
-            ),
-        )
-
     def _handle_conversion_item_input_audio_transcription_failed(
         self, event: ConversationItemInputAudioTranscriptionFailedEvent
     ) -> None:
@@ -1173,24 +962,17 @@ class RealtimeSession(
         item_generation.text_ch.send_nowait(delta)
         item_generation.audio_transcript += delta
 
-    def _handle_response_audio_delta(self, event: ResponseAudioDeltaEvent) -> None:
+    def _handle_response_audio_delta(self, audio: bytes) -> None:
         assert self._current_generation is not None, "current_generation is None"
         item_generation = self._current_generation.messages[event.item_id]
-
-        data = base64.b64decode(event.delta)
         item_generation.audio_ch.send_nowait(
             rtc.AudioFrame(
-                data=data,
-                sample_rate=SAMPLE_RATE,
-                num_channels=NUM_CHANNELS,
-                samples_per_channel=len(data) // 2,
+                data=audio,
+                sample_rate=self._realtime_model._opts.sample_rate,
+                num_channels=1,
+                samples_per_channel=len(audio) // 2,
             )
         )
-
-    def _handle_response_audio_transcript_done(
-        self, _: ResponseAudioTranscriptDoneEvent
-    ) -> None:
-        assert self._current_generation is not None, "current_generation is None"
 
     def _handle_response_audio_done(self, _: ResponseAudioDoneEvent) -> None:
         assert self._current_generation is not None, "current_generation is None"
@@ -1329,111 +1111,3 @@ class RealtimeSession(
                 recoverable=recoverable,
             ),
         )
-
-
-def _livekit_item_to_openai_item(item: llm.ChatItem) -> ConversationItem:
-    conversation_item = ConversationItem(
-        id=item.id,
-    )
-
-    if item.type == "function_call":
-        conversation_item.type = "function_call"
-        conversation_item.call_id = item.call_id
-        conversation_item.name = item.name
-        conversation_item.arguments = item.arguments
-
-    elif item.type == "function_call_output":
-        conversation_item.type = "function_call_output"
-        conversation_item.call_id = item.call_id
-        conversation_item.output = item.output
-
-    elif item.type == "message":
-        role = "system" if item.role == "developer" else item.role
-        conversation_item.type = "message"
-        conversation_item.role = role
-
-        content_list: list[ConversationItemContent] = []
-        for c in item.content:
-            if isinstance(c, str):
-                content_list.append(
-                    ConversationItemContent(
-                        type=("text" if role == "assistant" else "input_text"),
-                        text=c,
-                    )
-                )
-
-            elif isinstance(c, llm.ImageContent):
-                continue  # not supported for now
-            elif isinstance(c, llm.AudioContent):
-                if conversation_item.role == "user":
-                    encoded_audio = base64.b64encode(
-                        rtc.combine_audio_frames(c.frame).data
-                    ).decode("utf-8")
-
-                    content_list.append(
-                        ConversationItemContent(
-                            type="input_audio",
-                            audio=encoded_audio,
-                            transcript=c.transcript,
-                        )
-                    )
-
-        conversation_item.content = content_list
-
-    return conversation_item
-
-
-def _openai_item_to_livekit_item(item: ConversationItem) -> llm.ChatItem:
-    assert item.id is not None, "id is None"
-
-    if item.type == "function_call":
-        assert item.call_id is not None, "call_id is None"
-        assert item.name is not None, "name is None"
-        assert item.arguments is not None, "arguments is None"
-
-        return llm.FunctionCall(
-            id=item.id,
-            call_id=item.call_id,
-            name=item.name,
-            arguments=item.arguments,
-        )
-
-    if item.type == "function_call_output":
-        assert item.call_id is not None, "call_id is None"
-        assert item.output is not None, "output is None"
-
-        return llm.FunctionCallOutput(
-            id=item.id,
-            call_id=item.call_id,
-            output=item.output,
-            is_error=False,
-        )
-
-    if item.type == "message":
-        assert item.role is not None, "role is None"
-        assert item.content is not None, "content is None"
-
-        content: list[llm.ChatContent] = []
-
-        for c in item.content:
-            if c.type == "text" or c.type == "input_text":
-                assert c.text is not None, "text is None"
-                content.append(c.text)
-
-        return llm.ChatMessage(
-            id=item.id,
-            role=item.role,
-            content=content,
-        )
-
-    raise ValueError(f"unsupported item type: {item.type}")
-
-
-def _to_oai_tool_choice(tool_choice: llm.ToolChoice | None) -> str:
-    if isinstance(tool_choice, str):
-        return tool_choice
-
-    elif isinstance(tool_choice, dict) and tool_choice["type"] == "function":
-        return tool_choice["function"]["name"]
-
-    return "auto"
