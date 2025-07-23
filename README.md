@@ -1,9 +1,13 @@
-## livekit-plugins-chinese
+# 简介
 
-为[livekit-agents](https://github.com/livekit/agents)**实时语音智能体**框架提供中文插件支持。
+该项目为[livekit-agents](https://github.com/livekit/agents)**实时语音智能体**框架提供中文插件支持。
 
+## 更新历史
+- 2025.7.23: 
+  - livekit-agents依赖更新为1.2.0版本；
+  - 火山引擎插件新增端到端实时语音大模型；
 
-## plugins
+## 插件列表
 
 | 厂商 | STT | TTS | LLM | Realtime | 使用说明 |
 | ---- | --- | --- | --- | --- | --- |
