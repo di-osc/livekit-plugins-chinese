@@ -496,102 +496,112 @@ class RealtimeSession(
         @utils.log_exceptions(logger=logger)
         async def _recv_task() -> None:
             while True:
-                msg = await ws_conn.receive()
-                if msg.data is None:
-                    continue
-                response = parse_response(msg.data)
-                event = response.get("event")
-                if event == 450:  # ASRInfo
-                    self.emit("input_speech_started", llm.InputSpeechStartedEvent())
-                    logger.info("speech start")
-                elif event == 451:  # ASRResponse
-                    response = response["payload_msg"]
-                    transcription = response["results"][0]["alternatives"][0]["text"]
-                    is_final = not response["results"][0]["is_interim"]
-                    if is_final:
-                        item_id = utils.shortuuid()
+                try:
+                    msg = await ws_conn.receive()
+                    if msg.data is None:
+                        continue
+                    response = parse_response(msg.data)
+                    event = response.get("event")
+                    if event == 450:  # ASRInfo
+                        self.emit("input_speech_started", llm.InputSpeechStartedEvent())
+                        logger.info("speech start")
+                    elif event == 451:  # ASRResponse
+                        response = response["payload_msg"]
+                        transcription = response["results"][0]["alternatives"][0][
+                            "text"
+                        ]
+                        is_final = not response["results"][0]["is_interim"]
+                        if is_final:
+                            item_id = utils.shortuuid()
+                            self.emit(
+                                "input_audio_transcription_completed",
+                                llm.InputTranscriptionCompleted(
+                                    item_id=item_id,
+                                    transcript=transcription,
+                                    is_final=True,
+                                ),
+                            )
+                            if self._current_generation is None:
+                                self._current_generation = _ResponseGeneration(
+                                    message_ch=utils.aio.Chan(),
+                                    function_ch=utils.aio.Chan(),
+                                    messages={},
+                                    _created_timestamp=time.time(),
+                                    _done_fut=asyncio.Future(),
+                                )
+
+                                generation_ev = llm.GenerationCreatedEvent(
+                                    message_stream=self._current_generation.message_ch,
+                                    function_stream=self._current_generation.function_ch,
+                                    user_initiated=False,
+                                )
+
+                                self.emit("generation_created", generation_ev)
+                                item_id = utils.shortuuid()
+                                self._current_item = _MessageGeneration(
+                                    message_id=item_id,
+                                    text_ch=utils.aio.Chan(),
+                                    audio_ch=utils.aio.Chan(),
+                                )
+                                self._current_generation.message_ch.send_nowait(
+                                    llm.MessageGeneration(
+                                        message_id=item_id,
+                                        text_stream=self._current_item.text_ch,
+                                        audio_stream=self._current_item.audio_ch,
+                                    )
+                                )
+
+                    elif event == 459:  # ASREnd
+                        logger.info("speech end")
                         self.emit(
-                            "input_audio_transcription_completed",
-                            llm.InputTranscriptionCompleted(
-                                item_id=item_id,
-                                transcript=transcription,
-                                is_final=True,
+                            "input_speech_stopped",
+                            llm.InputSpeechStoppedEvent(
+                                user_transcription_enabled=False
                             ),
                         )
-                        if self._current_generation is None:
-                            self._current_generation = _ResponseGeneration(
-                                message_ch=utils.aio.Chan(),
-                                function_ch=utils.aio.Chan(),
-                                messages={},
-                                _created_timestamp=time.time(),
-                                _done_fut=asyncio.Future(),
-                            )
 
-                            generation_ev = llm.GenerationCreatedEvent(
-                                message_stream=self._current_generation.message_ch,
-                                function_stream=self._current_generation.function_ch,
-                                user_initiated=False,
+                    elif event == 352:  # TTSResponse
+                        if self._first_tts_response:
+                            logger.info("tts first response")
+                            self._first_tts_response = False
+                        audio_bytes = response[
+                            "payload_msg"
+                        ]  # 原始为float32，需要转为int16
+                        audio = np.frombuffer(audio_bytes, dtype=np.float32)
+                        # 裁剪到 [-1.0, 1.0]，避免溢出
+                        audio = np.clip(audio, -1.0, 1.0)
+                        audio = (audio * 32767).astype(np.int16)
+                        audio_bytes = audio.tobytes()
+                        self._current_item.audio_ch.send_nowait(
+                            rtc.AudioFrame(
+                                data=audio_bytes,
+                                sample_rate=self._realtime_model._opts.sample_rate,
+                                num_channels=1,
+                                samples_per_channel=len(audio_bytes) // 2,
                             )
-
-                            self.emit("generation_created", generation_ev)
-                            item_id = utils.shortuuid()
-                            self._current_item = _MessageGeneration(
-                                message_id=item_id,
-                                text_ch=utils.aio.Chan(),
-                                audio_ch=utils.aio.Chan(),
-                            )
-                            self._current_generation.message_ch.send_nowait(
-                                llm.MessageGeneration(
-                                    message_id=item_id,
-                                    text_stream=self._current_item.text_ch,
-                                    audio_stream=self._current_item.audio_ch,
-                                )
-                            )
-
-                elif event == 459:  # ASREnd
-                    logger.info("speech end")
-                    self.emit(
-                        "input_speech_stopped",
-                        llm.InputSpeechStoppedEvent(user_transcription_enabled=False),
-                    )
-
-                elif event == 352:  # TTSResponse
-                    if self._first_tts_response:
-                        logger.info("first tts response")
-                        self._first_tts_response = False
-                    audio_bytes = response[
-                        "payload_msg"
-                    ]  # 原始为float32，需要转为int16
-                    audio = np.frombuffer(audio_bytes, dtype=np.float32)
-                    audio = (audio * 32767).astype(np.int16)
-                    audio_bytes = audio.tobytes()
-                    self._current_item.audio_ch.send_nowait(
-                        rtc.AudioFrame(
-                            data=audio_bytes,
-                            sample_rate=self._realtime_model._opts.sample_rate,
-                            num_channels=1,
-                            samples_per_channel=len(audio_bytes) // 2,
                         )
-                    )
-                elif event == 359:  # TTSEnded
-                    self._current_item.audio_ch.close()
-                    if self._is_opening:
-                        self._current_item.text_ch.send_nowait(
-                            self._realtime_model._opts.opening
-                        )
+                    elif event == 359:  # TTSEnded
+                        self._current_item.audio_ch.close()
+                        if self._is_opening:
+                            self._current_item.text_ch.send_nowait(
+                                self._realtime_model._opts.opening
+                            )
+                            self._current_item.text_ch.close()
+                            self._is_opening = False
+                        self._current_generation.message_ch.close()
+                        self._current_generation.function_ch.close()
+                        self._current_generation = None
+                        self._first_tts_response = True
+                    elif event == 550:  # 模型回复的文本内容
+                        text = response["payload_msg"]["content"]
+                        self._current_item.text_ch.send_nowait(text)
+                    elif event == 559:  # 模型回复文本结束事件
                         self._current_item.text_ch.close()
-                        self._is_opening = False
-                    self._current_generation.message_ch.close()
-                    self._current_generation.function_ch.close()
-                    self._current_generation = None
-                    self._first_tts_response = True
-                elif event == 550:  # 模型回复的文本内容
-                    text = response["payload_msg"]["content"]
-                    self._current_item.text_ch.send_nowait(text)
-                elif event == 559:  # 模型回复文本结束事件
-                    self._current_item.text_ch.close()
-                else:
-                    pass
+                    else:
+                        pass
+                except Exception:
+                    logger.error("recv task error", exc_info=True)
+                    break
 
         tasks = [
             asyncio.create_task(_recv_task(), name="_recv_task"),
