@@ -7,7 +7,7 @@ from jsonargparse import auto_cli
 load_dotenv()
 
 
-def run(version: str):
+def run(version: str, publish: bool = True):
     dist_dir = Path("dist")
     if not dist_dir.exists():
         dist_dir.mkdir()
@@ -31,7 +31,10 @@ def run(version: str):
         os.system(f"cd {plugin} && uv build")
 
     pypi_token = os.getenv("PYPI_TOKEN")
-    if pypi_token:
+    if not pypi_token:
+        print("PYPI_TOKEN not set, skip publish")
+        return
+    if publish:
         os.system(f"uv publish --token {pypi_token}")
 
 
