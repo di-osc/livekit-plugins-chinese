@@ -2,9 +2,10 @@ from .bigmodel_stt import BigModelSTT
 from .llm import LLM
 from .stt import STT
 from .tts import TTS
+from .realtime import RealtimeModel
 from .version import __version__
 
-__all__ = ["TTS", "LLM", "STT", "BigModelSTT", "__version__"]
+__all__ = ["TTS", "LLM", "STT", "BigModelSTT", "RealtimeModel", "__version__"]
 
 from livekit.agents import Plugin
 

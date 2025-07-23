@@ -1,6 +1,6 @@
 # livekit-plugins-volcengine
 
-适配火山引擎服务的[livekit-agent](https://github.com/livekit/agents)框架插件。目前支持[TTS](https://www.volcengine.com/docs/6561/79817), [LLM](https://www.volcengine.com/docs/82379/1298454#%E6%B5%81%E5%BC%8F%E8%B0%83%E7%94%A8), [STT](https://www.volcengine.com/docs/6561/80818#python)，[BigModelSTT](https://www.volcengine.com/docs/6561/1354869)。
+适配火山引擎服务的[livekit-agent](https://github.com/livekit/agents)框架插件。目前支持[TTS](https://www.volcengine.com/docs/6561/79817), [LLM](https://www.volcengine.com/docs/82379/1298454#%E6%B5%81%E5%BC%8F%E8%B0%83%E7%94%A8), [STT](https://www.volcengine.com/docs/6561/80818#python)，[BigModelSTT](https://www.volcengine.com/docs/6561/1354869)，[Realtime](https://www.volcengine.com/docs/6561/1594356)
 
 ## 安装
 ```python
@@ -12,6 +12,7 @@ pip install livekit-plugins-volcengine
 - Volcengine TTS: `VOLCENGINE_TTS_ACCESS_TOKEN`
 - Volcengine STT: `VOLCENGINE_STT_ACCESS_TOKEN`
 - Volcengine LLM: `VOLCENGINE_LLM_API_KEY`
+- Volcengine Realtime: `VOLCENGINE_REALTIME_ACCESS_TOKEN`
 
 ## 使用示例
 
@@ -38,6 +39,11 @@ async def entry_point(ctx: JobContext):
         tts=volcengine.TTS(app_id="xxx", cluster="xxx", vioce_type="BV001_V2_streaming"),
         # 大语言模型：https://www.volcengine.com/docs/82379/1513689
         llm=volcengine.LLM(model="doubao-1-5-lite-32k-250115"),
+        # 端到端实时语音大模型：https://www.volcengine.com/docs/6561/1594356
+        llm=volcengine.RealtimeModel(app_id="xxxx",
+                                     speaking_style="xxxx", # 回复语音风格
+                                     system_role="xxx", # 系统提示词
+                                     opening="xxx") # 开场词
     )
     
     await session.start(agent=agent, room=ctx.room)
