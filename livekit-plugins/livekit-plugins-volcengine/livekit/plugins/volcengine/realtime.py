@@ -248,8 +248,8 @@ class _ResponseGeneration:
 class RealtimeModel(llm.RealtimeModel):
     def __init__(
         self,
-        bot_name: str = "小助手",
-        system_role: str = "you are a helpful assistant",
+        bot_name: str = "豆包",
+        system_role: str = "你是一个语音助手。",
         opening: str = "你好啊，今天过得怎么样？",
         speaking_style: str = "你的说话风格简洁明了，语速适中，语调自然。",
         app_id: str = None,
@@ -329,6 +329,7 @@ class RealtimeSession(
     def __init__(self, realtime_model: RealtimeModel) -> None:
         super().__init__(realtime_model)
         self._realtime_model: RealtimeModel = realtime_model
+        self._opts = realtime_model._opts
         self._tools = llm.ToolContext.empty()
         self._msg_ch = utils.aio.Chan[rtc.AudioFrame]()
         self._input_resampler: rtc.AudioResampler | None = None
@@ -349,6 +350,7 @@ class RealtimeSession(
         self._current_item: _MessageGeneration | None = None
         self._remote_chat_ctx = llm.remote_chat_context.RemoteChatContext()
         self._is_opening = True
+        self._first_tts_response = True
 
         self._update_chat_ctx_lock = asyncio.Lock()
         self._update_fnc_ctx_lock = asyncio.Lock()
@@ -501,6 +503,7 @@ class RealtimeSession(
                 event = response.get("event")
                 if event == 450:  # ASRInfo
                     self.emit("input_speech_started", llm.InputSpeechStartedEvent())
+                    logger.info("speech start")
                 elif event == 451:  # ASRResponse
                     response = response["payload_msg"]
                     transcription = response["results"][0]["alternatives"][0]["text"]
@@ -537,7 +540,6 @@ class RealtimeSession(
                                 text_ch=utils.aio.Chan(),
                                 audio_ch=utils.aio.Chan(),
                             )
-                            logger.info(f"create message generation {item_id}")
                             self._current_generation.message_ch.send_nowait(
                                 llm.MessageGeneration(
                                     message_id=item_id,
@@ -547,12 +549,16 @@ class RealtimeSession(
                             )
 
                 elif event == 459:  # ASREnd
+                    logger.info("speech end")
                     self.emit(
                         "input_speech_stopped",
                         llm.InputSpeechStoppedEvent(user_transcription_enabled=False),
                     )
 
                 elif event == 352:  # TTSResponse
+                    if self._first_tts_response:
+                        logger.info("first tts response")
+                        self._first_tts_response = False
                     audio_bytes = response[
                         "payload_msg"
                     ]  # 原始为float32，需要转为int16
@@ -578,14 +584,14 @@ class RealtimeSession(
                     self._current_generation.message_ch.close()
                     self._current_generation.function_ch.close()
                     self._current_generation = None
+                    self._first_tts_response = True
                 elif event == 550:  # 模型回复的文本内容
                     text = response["payload_msg"]["content"]
                     self._current_item.text_ch.send_nowait(text)
                 elif event == 559:  # 模型回复文本结束事件
                     self._current_item.text_ch.close()
-                    pass
                 else:
-                    logger.info(f"unknown event {event}")
+                    pass
 
         tasks = [
             asyncio.create_task(_recv_task(), name="_recv_task"),
@@ -641,10 +647,7 @@ class RealtimeSession(
         return events
 
     async def update_instructions(self, instructions: str) -> None:
-        # event_id = utils.shortuuid("instructions_update_")
-        # f = asyncio.Future()
-        # self._response_futures[event_id] = f
-        self._instructions = instructions
+        self._opts.system_role = instructions
 
     def push_audio(self, frame: rtc.AudioFrame) -> None:
         for f in self._resample_audio(frame):
@@ -657,7 +660,7 @@ class RealtimeSession(
         pass
 
     def commit_audio(self) -> None:
-        if self._pushed_duration_s > 0.1:  # OpenAI requires at least 100ms of audio
+        if self._pushed_duration_s > 0.1:
             self._pushed_duration_s = 0
 
     def clear_audio(self) -> None:
