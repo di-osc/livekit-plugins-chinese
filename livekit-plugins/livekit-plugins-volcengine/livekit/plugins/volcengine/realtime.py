@@ -15,7 +15,6 @@ from typing import Literal
 
 import aiohttp
 import numpy as np
-
 from livekit import rtc
 from livekit.agents import llm, utils
 from livekit.agents.types import (
@@ -25,21 +24,7 @@ from livekit.agents.types import (
     NotGivenOr,
 )
 
-
 from .log import logger
-
-# When a response is created with the OpenAI Realtime API, those events are sent in this order:
-# 1. response.created (contains resp_id)
-# 2. response.output_item.added (contains item_id)
-# 3. conversation.item.created
-# 4. response.content_part.added (type audio/text)
-# 5. response.audio_transcript.delta (x2, x3, x4, etc)
-# 6. response.audio.delta (x2, x3, x4, etc)
-# 7. response.content_part.done
-# 8. response.output_item.done (contains item_status: "completed/incomplete")
-# 9. response.done (contains status_details for cancelled/failed/turn_detected/content_filter)
-#
-# Ourcode assumes a response will generate only one item with type "message"
 
 
 PROTOCOL_VERSION = 0b0001
@@ -204,7 +189,7 @@ class _RealtimeOptions:
         }
         return headers
 
-    def get_start_session_reqs(self):
+    def get_start_session_reqs(self, dialog_id: str | None) -> dict:
         start_session_req = {
             "tts": {
                 "audio_config": {
@@ -216,6 +201,7 @@ class _RealtimeOptions:
             "dialog": {
                 "bot_name": self.bot_name,
                 "system_role": self.system_role,
+                "dialog_id": dialog_id or str(utils.shortuuid()),
                 "speaking_style": self.speaking_style,
                 "extra": {"strict_audit": False},
             },
@@ -249,11 +235,12 @@ class RealtimeModel(llm.RealtimeModel):
     def __init__(
         self,
         bot_name: str = "豆包",
-        system_role: str = "你是一个语音助手。",
-        opening: str = "你好啊，今天过得怎么样？",
         speaking_style: str = "你的说话风格简洁明了，语速适中，语调自然。",
-        app_id: str = None,
-        access_token: str = None,
+        opening: str | None = None,
+        app_id: str | None = None,
+        access_token: str | None = None,
+        system_role: str | None = None,
+        audio_output: bool = True,
         http_session: aiohttp.ClientSession | None = None,
         max_session_duration: NotGivenOr[float | None] = NOT_GIVEN,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
@@ -264,7 +251,7 @@ class RealtimeModel(llm.RealtimeModel):
                 turn_detection=True,
                 user_transcription=True,
                 auto_tool_reply_generation=False,
-                audio_output=True,
+                audio_output=audio_output,
             )
         )
 
@@ -349,8 +336,10 @@ class RealtimeSession(
         self._current_generation: _ResponseGeneration | None = None
         self._current_item: _MessageGeneration | None = None
         self._remote_chat_ctx = llm.remote_chat_context.RemoteChatContext()
-        self._is_opening = True
+        self._is_opening = False
         self._first_tts_response = True
+        self._first_llm_response = True
+        self._first_llm_sentence = True
 
         self._update_chat_ctx_lock = asyncio.Lock()
         self._update_fnc_ctx_lock = asyncio.Lock()
@@ -398,6 +387,7 @@ class RealtimeSession(
 
     async def _run_ws(self, ws_conn: aiohttp.ClientWebSocketResponse) -> None:
         closing = False
+        logger.info("start connection")
         start_connection_request = bytearray(generate_header())
         start_connection_request.extend(int(1).to_bytes(4, "big"))
         payload_bytes = str.encode("{}")
@@ -406,64 +396,55 @@ class RealtimeSession(
         start_connection_request.extend(payload_bytes)
         await ws_conn.send_bytes(start_connection_request)
         _ = await ws_conn.receive_bytes()
-        logger.info("startConnection response")
 
-        request_params = self._realtime_model._opts.get_start_session_reqs()
-        payload_bytes = str.encode(json.dumps(request_params))
-        payload_bytes = gzip.compress(payload_bytes)
-        start_session_request = bytearray(generate_header())
-        start_session_request.extend(int(100).to_bytes(4, "big"))
-        start_session_request.extend((len(self.session_id)).to_bytes(4, "big"))
-        start_session_request.extend(str.encode(self.session_id))
-        start_session_request.extend((len(payload_bytes)).to_bytes(4, "big"))
-        start_session_request.extend(payload_bytes)
-        await ws_conn.send_bytes(start_session_request)
-        _ = await ws_conn.receive_bytes()
-        logger.info("startSession response")
+        logger.info("start session")
+        await self._start_session(ws_conn=ws_conn, dialog_id=self.session_id)
 
-        payload = {
-            "content": self._realtime_model._opts.opening,
-        }
-        hello_request = bytearray(generate_header())
-        hello_request.extend(int(300).to_bytes(4, "big"))
-        payload_bytes = str.encode(json.dumps(payload))
-        payload_bytes = gzip.compress(payload_bytes)
-        hello_request.extend((len(self.session_id)).to_bytes(4, "big"))
-        hello_request.extend(str.encode(self.session_id))
-        hello_request.extend((len(payload_bytes)).to_bytes(4, "big"))
-        hello_request.extend(payload_bytes)
-        await ws_conn.send_bytes(hello_request)
-        self._is_opening = True
-        logger.info("send hello request")
+        if self._realtime_model._opts.opening is not None:
+            self._is_opening = True
+            payload = {
+                "content": self._realtime_model._opts.opening,
+            }
+            hello_request = bytearray(generate_header())
+            hello_request.extend(int(300).to_bytes(4, "big"))
+            payload_bytes = str.encode(json.dumps(payload))
+            payload_bytes = gzip.compress(payload_bytes)
+            hello_request.extend((len(self.session_id)).to_bytes(4, "big"))
+            hello_request.extend(str.encode(self.session_id))
+            hello_request.extend((len(payload_bytes)).to_bytes(4, "big"))
+            hello_request.extend(payload_bytes)
+            await ws_conn.send_bytes(hello_request)
+            self._is_opening = True
+            logger.info("send hello request")
 
-        self._current_generation = _ResponseGeneration(
-            message_ch=utils.aio.Chan(),
-            function_ch=utils.aio.Chan(),
-            messages={},
-            _created_timestamp=time.time(),
-            _done_fut=asyncio.Future(),
-        )
-
-        generation_ev = llm.GenerationCreatedEvent(
-            message_stream=self._current_generation.message_ch,
-            function_stream=self._current_generation.function_ch,
-            user_initiated=False,
-        )
-        self.emit("generation_created", generation_ev)
-        item_id = utils.shortuuid()
-        self._current_item = _MessageGeneration(
-            message_id=item_id,
-            text_ch=utils.aio.Chan(),
-            audio_ch=utils.aio.Chan(),
-        )
-
-        self._current_generation.message_ch.send_nowait(
-            llm.MessageGeneration(
-                message_id=item_id,
-                text_stream=self._current_item.text_ch,
-                audio_stream=self._current_item.audio_ch,
+            self._current_generation = _ResponseGeneration(
+                message_ch=utils.aio.Chan(),
+                function_ch=utils.aio.Chan(),
+                messages={},
+                _created_timestamp=time.time(),
+                _done_fut=asyncio.Future(),
             )
-        )
+
+            generation_ev = llm.GenerationCreatedEvent(
+                message_stream=self._current_generation.message_ch,
+                function_stream=self._current_generation.function_ch,
+                user_initiated=False,
+            )
+            self.emit("generation_created", generation_ev)
+            item_id = utils.shortuuid()
+            self._current_item = _MessageGeneration(
+                message_id=item_id,
+                text_ch=utils.aio.Chan(),
+                audio_ch=utils.aio.Chan(),
+            )
+
+            self._current_generation.message_ch.send_nowait(
+                llm.MessageGeneration(
+                    message_id=item_id,
+                    text_stream=self._current_item.text_ch,
+                    audio_stream=self._current_item.audio_ch,
+                )
+            )
 
         @utils.log_exceptions(logger=logger)
         async def _send_task() -> None:
@@ -504,7 +485,7 @@ class RealtimeSession(
                     event = response.get("event")
                     if event == 450:  # ASRInfo
                         self.emit("input_speech_started", llm.InputSpeechStartedEvent())
-                        logger.info("speech start")
+                        logger.info("transcription start")
                     elif event == 451:  # ASRResponse
                         response = response["payload_msg"]
                         transcription = response["results"][0]["alternatives"][0][
@@ -552,16 +533,19 @@ class RealtimeSession(
                                 )
 
                     elif event == 459:  # ASREnd
-                        logger.info("speech end")
+                        logger.info("transcription end")
                         self.emit(
                             "input_speech_stopped",
                             llm.InputSpeechStoppedEvent(
                                 user_transcription_enabled=False
                             ),
                         )
+                        logger.info("llm start")
+                        logger.info("tts start")
 
                     elif event == 352:  # TTSResponse
                         if self._first_tts_response:
+                            logger.info("llm first sentence")
                             logger.info("tts first response")
                             self._first_tts_response = False
                         audio_bytes = response[
@@ -580,7 +564,12 @@ class RealtimeSession(
                                 samples_per_channel=len(audio_bytes) // 2,
                             )
                         )
+                    elif event == 350:  # TTSSentenceStart
+                        pass
+                    elif event == 351:  # TTSSentenceEnd
+                        pass
                     elif event == 359:  # TTSEnded
+                        logger.info("tts end")
                         self._current_item.audio_ch.close()
                         if self._is_opening:
                             self._current_item.text_ch.send_nowait(
@@ -593,10 +582,15 @@ class RealtimeSession(
                         self._current_generation = None
                         self._first_tts_response = True
                     elif event == 550:  # 模型回复的文本内容
+                        if self._first_llm_response:
+                            logger.info("llm first response")
+                            self._first_llm_response = False
                         text = response["payload_msg"]["content"]
                         self._current_item.text_ch.send_nowait(text)
                     elif event == 559:  # 模型回复文本结束事件
+                        logger.info("llm end")
                         self._current_item.text_ch.close()
+                        self._first_llm_response = True
                     else:
                         pass
                 except Exception:
@@ -607,20 +601,10 @@ class RealtimeSession(
             asyncio.create_task(_recv_task(), name="_recv_task"),
             asyncio.create_task(_send_task(), name="_send_task"),
         ]
-        wait_reconnect_task: asyncio.Task | None = None
-        # if self._realtime_model._opts.max_session_duration is not None:
-        #     wait_reconnect_task = asyncio.create_task(
-        #         asyncio.sleep(self._realtime_model._opts.max_session_duration),
-        #         name="_timeout_task",
-        #     )
-        #     tasks.append(wait_reconnect_task)
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-
-            # propagate exceptions from completed tasks
             for task in done:
-                if task != wait_reconnect_task:
-                    task.result()
+                task.result()
 
         finally:
             await utils.aio.cancel_and_wait(*tasks)
@@ -628,6 +612,23 @@ class RealtimeSession(
 
     def _create_session_update_event(self):
         pass
+
+    async def _start_session(
+        self, ws_conn: aiohttp.ClientWebSocketResponse, dialog_id: str
+    ) -> None:
+        request_params = self._realtime_model._opts.get_start_session_reqs(
+            dialog_id=dialog_id
+        )
+        payload_bytes = str.encode(json.dumps(request_params))
+        payload_bytes = gzip.compress(payload_bytes)
+        start_session_request = bytearray(generate_header())
+        start_session_request.extend(int(100).to_bytes(4, "big"))
+        start_session_request.extend((len(self.session_id)).to_bytes(4, "big"))
+        start_session_request.extend(str.encode(self.session_id))
+        start_session_request.extend((len(payload_bytes)).to_bytes(4, "big"))
+        start_session_request.extend(payload_bytes)
+        await ws_conn.send_bytes(start_session_request)
+        _ = await ws_conn.receive_bytes()
 
     @property
     def chat_ctx(self) -> llm.ChatContext:
