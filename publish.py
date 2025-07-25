@@ -27,6 +27,8 @@ def run(version: str, publish: bool = True):
         # 修改version.py文件
         with open(plugin / f"livekit/plugins/{plugin_name}" / "version.py", "w") as f:
             f.write(f'''__version__ = "{version}"''')
+            # 添加空行
+            f.write("\n")
         print(f"Building {plugin.name} for version {version}")
         os.system(f"cd {plugin} && uv build")
 
