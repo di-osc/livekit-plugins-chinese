@@ -613,6 +613,31 @@ class RealtimeSession(
     def _create_session_update_event(self):
         pass
 
+    async def chat_tts_text(
+        self,
+        start: bool,
+        end: bool,
+        content: str,
+        ws_conn: aiohttp.ClientWebSocketResponse,
+    ) -> None:
+        """发送Chat TTS Text消息"""
+        payload = {
+            "start": start,
+            "end": end,
+            "content": content,
+        }
+        logger.info("ChatTTSTextRequest")
+        payload_bytes = str.encode(json.dumps(payload))
+        payload_bytes = gzip.compress(payload_bytes)
+
+        chat_tts_text_request = bytearray(generate_header())
+        chat_tts_text_request.extend(int(500).to_bytes(4, "big"))
+        chat_tts_text_request.extend((len(self.session_id)).to_bytes(4, "big"))
+        chat_tts_text_request.extend(str.encode(self.session_id))
+        chat_tts_text_request.extend((len(payload_bytes)).to_bytes(4, "big"))
+        chat_tts_text_request.extend(payload_bytes)
+        await ws_conn.send_bytes(chat_tts_text_request)
+
     async def _start_session(
         self, ws_conn: aiohttp.ClientWebSocketResponse, dialog_id: str
     ) -> None:
@@ -628,6 +653,29 @@ class RealtimeSession(
         start_session_request.extend((len(payload_bytes)).to_bytes(4, "big"))
         start_session_request.extend(payload_bytes)
         await ws_conn.send_bytes(start_session_request)
+        _ = await ws_conn.receive_bytes()
+
+    async def _finish_session(self, ws_conn: aiohttp.ClientWebSocketResponse) -> None:
+        finish_session_request = bytearray(generate_header())
+        finish_session_request.extend(int(102).to_bytes(4, "big"))
+        payload_bytes = str.encode("{}")
+        payload_bytes = gzip.compress(payload_bytes)
+        finish_session_request.extend((len(self.session_id)).to_bytes(4, "big"))
+        finish_session_request.extend(str.encode(self.session_id))
+        finish_session_request.extend((len(payload_bytes)).to_bytes(4, "big"))
+        finish_session_request.extend(payload_bytes)
+        await ws_conn.send_bytes(finish_session_request)
+
+    async def _finish_connection(
+        self, ws_conn: aiohttp.ClientWebSocketResponse
+    ) -> None:
+        finish_connection_request = bytearray(generate_header())
+        finish_connection_request.extend(int(2).to_bytes(4, "big"))
+        payload_bytes = str.encode("{}")
+        payload_bytes = gzip.compress(payload_bytes)
+        finish_connection_request.extend((len(payload_bytes)).to_bytes(4, "big"))
+        finish_connection_request.extend(payload_bytes)
+        await ws_conn.send_bytes(finish_connection_request)
         _ = await ws_conn.receive_bytes()
 
     @property
