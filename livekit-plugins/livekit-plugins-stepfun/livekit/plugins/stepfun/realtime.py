@@ -100,7 +100,6 @@ lk_oai_debug = int(os.getenv("LK_OPENAI_DEBUG", 0))
 class _RealtimeOptions:
     voice: str
     temperature: float
-    model: str = "step-1o-audio"
     tool_choice: llm.ToolChoice | None
     input_audio_transcription: InputAudioTranscription | None
     input_audio_noise_reduction: InputAudioNoiseReduction | None
@@ -116,6 +115,7 @@ class _RealtimeOptions:
     max_session_duration: float | None
     """reset the connection after this many seconds if provided"""
     conn_options: APIConnectOptions
+    model: str = "step-1o-audio"
 
 
 @dataclass
