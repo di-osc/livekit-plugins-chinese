@@ -16,5 +16,6 @@
 | Dify | ❎ | ❎  | ✅  | ❎|[点击这里](livekit-plugins/livekit-plugins-dify) |
 | FlashTTS | ❎ | ✅  | ❎ | ❎ |[点击这里](livekit-plugins/livekit-plugins-flashtts) |
 | 阿里云 | ✅ | ✅  | ✅ | ❎ |[点击这里](livekit-plugins/livekit-plugins-aliyun) |
+| 阶跃星辰 | ❎ | ❎  | ❎ | ✅ |[点击这里](livekit-plugins/livekit-plugins-stepfun) |
 
 
