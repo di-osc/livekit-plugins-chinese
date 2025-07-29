@@ -9,14 +9,14 @@ pip install livekit-plugins-stepfun
 
 ## 环境变量
 
-- Stepfun Realtime: `STEPFUN_REALTIME_ACCESS_TOKEN`
+- Stepfun Realtime: `STEPFUN_REALTIME_API_KEY`
 
 ## 使用示例
 
 
 ```python
 from livekit.agents import Agent, AgentSession, JobContext, cli, WorkerOptions
-from livekit.plugins import volcengine, deepgram, silero
+from livekit.plugins import stepfun
 from dotenv import load_dotenv
 
 
@@ -27,12 +27,10 @@ async def entry_point(ctx: JobContext):
     agent = Agent(instructions="You are a helpful assistant.")
 
     session = AgentSession(
-        llm=volcengine.RealtimeModel()
+        llm=stepfun.RealtimeModel(voice="ganliannvsheng")
     )
     
     await session.start(agent=agent, room=ctx.room)
-    
-    await session.generate_reply()
 
 if __name__ == "__main__":
     load_dotenv()
