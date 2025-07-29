@@ -93,7 +93,7 @@ SAMPLE_RATE = 24000
 NUM_CHANNELS = 1
 OPENAI_BASE_URL = "wss://api.stepfun.com/v1/realtime"
 
-lk_oai_debug = int(os.getenv("LK_OPENAI_DEBUG", 0))
+lk_oai_debug = int(os.getenv("LK_REALTIME_DEBUG", 0))
 
 
 @dataclass
@@ -376,6 +376,9 @@ class RealtimeSession(
         self._pushed_duration_s: float = (
             0  # duration of audio pushed to the OpenAI Realtime API
         )
+        self._llm_first_sentence = True
+        self._llm_first_response = True
+        self._tts_first_response = True
 
     def send_event(self, event: RealtimeClientEvent | dict[str, Any]) -> None:
         with contextlib.suppress(utils.aio.channel.ChanClosed):
@@ -548,7 +551,6 @@ class RealtimeSession(
                 # emit the raw json dictionary instead of the BaseModel because different
                 # providers can have different event types that are not part of the OpenAI Realtime API  # noqa: E501
                 self.emit("openai_server_event_received", event)
-
                 try:
                     if lk_oai_debug:
                         event_copy = event.copy()
@@ -557,6 +559,7 @@ class RealtimeSession(
 
                         logger.debug(f"<<< {event_copy}")
                     if event["type"] == "input_audio_buffer.speech_started":
+                        logger.info("transcription start")
                         self._handle_input_audio_buffer_speech_started(
                             InputAudioBufferSpeechStartedEvent.construct(**event)
                         )
@@ -564,6 +567,10 @@ class RealtimeSession(
                         self._handle_input_audio_buffer_speech_stopped(
                             InputAudioBufferSpeechStoppedEvent.construct(**event)
                         )
+                    elif event["type"] == "input_audio_buffer.committed":
+                        logger.info("transcription end")
+                        logger.info("llm start")
+                        logger.info("tts start")
                     elif event["type"] == "response.created":
                         self._handle_response_created(
                             ResponseCreatedEvent.construct(**event)
@@ -603,6 +610,10 @@ class RealtimeSession(
                             ResponseContentPartDoneEvent.construct(**event)
                         )
                     elif event["type"] == "response.text.delta":
+                        if self._llm_first_response:
+                            logger.info("llm first response")
+                            logger.info("llm first sentence")
+                            self._llm_first_response = False
                         self._handle_response_text_delta(
                             ResponseTextDeltaEvent.construct(**event)
                         )
@@ -611,16 +622,26 @@ class RealtimeSession(
                             ResponseTextDoneEvent.construct(**event)
                         )
                     elif event["type"] == "response.audio_transcript.delta":
+                        if self._llm_first_response:
+                            logger.info("llm first response")
+                            logger.info("llm first sentence")
+                            self._llm_first_response = False
                         self._handle_response_audio_transcript_delta(event)
                     elif event["type"] == "response.audio.delta":
+                        if self._tts_first_response:
+                            logger.info("tts first response")
+                            self._tts_first_response = False
                         self._handle_response_audio_delta(
                             ResponseAudioDeltaEvent.construct(**event)
                         )
                     elif event["type"] == "response.audio_transcript.done":
+                        logger.info("llm end")
                         self._handle_response_audio_transcript_done(
                             ResponseAudioTranscriptDoneEvent.construct(**event)
                         )
                     elif event["type"] == "response.audio.done":
+                        logger.info("tts end")
+                        self._tts_first_response = True
                         self._handle_response_audio_done(
                             ResponseAudioDoneEvent.construct(**event)
                         )
@@ -629,6 +650,9 @@ class RealtimeSession(
                             ResponseOutputItemDoneEvent.construct(**event)
                         )
                     elif event["type"] == "response.done":
+                        self._llm_first_response = True
+                        self._tts_first_response = True
+                        self._llm_first_sentence = True
                         self._handle_response_done(ResponseDoneEvent.construct(**event))
                     elif event["type"] == "error":
                         self._handle_error(ErrorEvent.construct(**event))
