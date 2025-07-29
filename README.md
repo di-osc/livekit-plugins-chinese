@@ -1,6 +1,6 @@
 # 简介
 
-该项目为[livekit-agents](https://github.com/livekit/agents)**实时语音智能体**框架提供中文插件支持。
+该项目为[livekit-agents](https://github.com/livekit/agents)**实时语音智能体**框架提供中文插件支持以及[延迟测试](./benchmark/README.md)。
 
 
 ## 插件列表
