@@ -98,9 +98,9 @@ lk_oai_debug = int(os.getenv("LK_OPENAI_DEBUG", 0))
 
 @dataclass
 class _RealtimeOptions:
-    model: str
     voice: str
     temperature: float
+    model: str = "step-1o-audio"
     tool_choice: llm.ToolChoice | None
     input_audio_transcription: InputAudioTranscription | None
     input_audio_noise_reduction: InputAudioNoiseReduction | None
@@ -163,8 +163,7 @@ class RealtimeModel(llm.RealtimeModel):
     def __init__(
         self,
         *,
-        model: str = "step-1o-audio",
-        voice: str = "cixingnansheng",
+        voice: str = "ganliannvsheng",
         modalities: NotGivenOr[list[Literal["text", "audio"]]] = NOT_GIVEN,
         temperature: NotGivenOr[float] = NOT_GIVEN,
         tool_choice: NotGivenOr[llm.ToolChoice | None] = NOT_GIVEN,
@@ -194,7 +193,7 @@ class RealtimeModel(llm.RealtimeModel):
             )
         )
 
-        api_key = api_key or os.environ.get("STEPFUN_API_KEY")
+        api_key = api_key or os.environ.get("STEPFUN_REALTIME_API_KEY")
 
         if is_given(base_url):
             base_url_val = base_url
@@ -202,7 +201,6 @@ class RealtimeModel(llm.RealtimeModel):
             base_url_val = OPENAI_BASE_URL
 
         self._opts = _RealtimeOptions(
-            model=model,
             voice=voice,
             temperature=temperature if is_given(temperature) else DEFAULT_TEMPERATURE,
             tool_choice=tool_choice or None,
