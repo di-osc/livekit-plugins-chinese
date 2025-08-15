@@ -171,6 +171,7 @@ class _RealtimeOptions:
     conn_options: APIConnectOptions
     opening: str = "你好啊，今天过得怎么样？"
     speaking_style: str = "你的说话风格简洁明了，语速适中，语调自然。"
+    speaker: str = "zh_female_vv_jupiter_bigtts"
     sample_rate: int = 24000
     num_channels: int = 1
     format: str = "pcm"
@@ -197,6 +198,7 @@ class _RealtimeOptions:
                     "format": self.format,
                     "sample_rate": self.sample_rate,
                 },
+                "speaker": self.speaker,
             },
             "dialog": {
                 "bot_name": self.bot_name,
@@ -236,6 +238,7 @@ class RealtimeModel(llm.RealtimeModel):
         self,
         bot_name: str = "豆包",
         speaking_style: str = "你的说话风格简洁明了，语速适中，语调自然。",
+        speaker: str = "zh_female_vv_jupiter_bigtts",
         opening: str | None = None,
         app_id: str | None = None,
         access_token: str | None = None,
@@ -270,6 +273,7 @@ class RealtimeModel(llm.RealtimeModel):
             conn_options=conn_options,
             bot_name=bot_name,
             system_role=system_role,
+            speaker=speaker,
             opening=opening,
             speaking_style=speaking_style,
         )
