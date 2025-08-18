@@ -8,9 +8,6 @@ authors = [
 ]
 keywords = ["webrtc", "realtime", "audio", "video", "livekit"]
 requires-python = ">=3.9"
-dependencies = [
-    "livekit-agents>=1.2.3",
-]
 
 classifiers = [
     "Intended Audience :: Developers",
@@ -22,6 +19,9 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "livekit-agents==1.2.2",
 ]
 
 
