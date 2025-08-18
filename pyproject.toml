@@ -1,3 +1,8 @@
+[project]
+name = "livekit-plugins-chinese"
+version = "0.1.0"
+requires-python = ">=3.10"
+
 [tool.uv.sources]
 livekit-plugins-volcengine = { workspace = true }
 livekit-plugins-xunfei = { workspace = true }
