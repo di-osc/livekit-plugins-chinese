@@ -169,6 +169,7 @@ class _RealtimeOptions:
     system_role: str
     max_session_duration: float | None
     conn_options: APIConnectOptions
+    modalities: list[Literal["text", "audio"]]
     opening: str = "你好啊，今天过得怎么样？"
     speaking_style: str = "你的说话风格简洁明了，语速适中，语调自然。"
     speaker: str = "zh_female_vv_jupiter_bigtts"
@@ -217,6 +218,7 @@ class _MessageGeneration:
     text_ch: utils.aio.Chan[str]
     audio_ch: utils.aio.Chan[rtc.AudioFrame]
     audio_transcript: str = ""
+    modalities: asyncio.Future[list[Literal["text", "audio"]]] | None = None
 
 
 @dataclass
@@ -244,17 +246,19 @@ class RealtimeModel(llm.RealtimeModel):
         access_token: str | None = None,
         system_role: str | None = None,
         audio_output: bool = True,
+        modalities: NotGivenOr[list[Literal["text", "audio"]]] = NOT_GIVEN,
         http_session: aiohttp.ClientSession | None = None,
         max_session_duration: NotGivenOr[float | None] = NOT_GIVEN,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> None:
+        modalities = modalities if utils.is_given(modalities) else ["text", "audio"]
         super().__init__(
             capabilities=llm.RealtimeCapabilities(
                 message_truncation=True,
                 turn_detection=True,
                 user_transcription=True,
                 auto_tool_reply_generation=False,
-                audio_output=audio_output,
+                audio_output=("audio" in modalities),
             )
         )
 
@@ -276,6 +280,7 @@ class RealtimeModel(llm.RealtimeModel):
             speaker=speaker,
             opening=opening,
             speaking_style=speaking_style,
+            modalities=modalities,
         )
         self._http_session = http_session
         self._sessions = weakref.WeakSet[RealtimeSession]()
@@ -436,17 +441,25 @@ class RealtimeSession(
             )
             self.emit("generation_created", generation_ev)
             item_id = utils.shortuuid()
+            modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = asyncio.Future()
             self._current_item = _MessageGeneration(
                 message_id=item_id,
                 text_ch=utils.aio.Chan(),
                 audio_ch=utils.aio.Chan(),
+                modalities=modalities_fut,
             )
+            if not self._realtime_model.capabilities.audio_output:
+                self._current_item.audio_ch.close()
+                self._current_item.modalities.set_result(["text"])  # type: ignore[union-attr]
+            else:
+                self._current_item.modalities.set_result(["audio", "text"])  # type: ignore[union-attr]
 
             self._current_generation.message_ch.send_nowait(
                 llm.MessageGeneration(
                     message_id=item_id,
                     text_stream=self._current_item.text_ch,
                     audio_stream=self._current_item.audio_ch,
+                    modalities=self._current_item.modalities,
                 )
             )
 
@@ -523,16 +536,24 @@ class RealtimeSession(
 
                                 self.emit("generation_created", generation_ev)
                                 item_id = utils.shortuuid()
+                                modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = asyncio.Future()
                                 self._current_item = _MessageGeneration(
                                     message_id=item_id,
                                     text_ch=utils.aio.Chan(),
                                     audio_ch=utils.aio.Chan(),
+                                    modalities=modalities_fut,
                                 )
+                                if not self._realtime_model.capabilities.audio_output:
+                                    self._current_item.audio_ch.close()
+                                    self._current_item.modalities.set_result(["text"])  # type: ignore[union-attr]
+                                else:
+                                    self._current_item.modalities.set_result(["audio", "text"])  # type: ignore[union-attr]
                                 self._current_generation.message_ch.send_nowait(
                                     llm.MessageGeneration(
                                         message_id=item_id,
                                         text_stream=self._current_item.text_ch,
                                         audio_stream=self._current_item.audio_ch,
+                                        modalities=self._current_item.modalities,
                                     )
                                 )
 
@@ -752,13 +773,15 @@ class RealtimeSession(
         self,
         *,
         message_id: str,
+        modalities: list[Literal["text", "audio"]],
         audio_end_ms: int,
         audio_transcript: NotGivenOr[str] = NOT_GIVEN,
     ) -> None:
-        if self._realtime_model.capabilities.audio_output:
+        if "audio" in modalities:
+            # 当前 volcengine 实时接口未暴露远端音频截断事件；占位以对齐接口
             pass
         elif utils.is_given(audio_transcript):
-            # sync the forwarded text to the remote chat ctx
+            # 同步转写文本到远端会话上下文
             chat_ctx = self.chat_ctx.copy()
             if (idx := chat_ctx.index_by_id(message_id)) is not None:
                 new_item = copy.copy(chat_ctx.items[idx])

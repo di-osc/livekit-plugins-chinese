@@ -13,7 +13,7 @@ dependencies = [
     "osc-data>=0.2.2",
     "pydantic",
     "numpy",
-    "livekit-agents==1.2.2",
+    "livekit-agents>=1.2.6",
 ]
 
 classifiers = [
