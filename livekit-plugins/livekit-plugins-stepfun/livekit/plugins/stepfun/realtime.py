@@ -124,6 +124,7 @@ class _MessageGeneration:
     text_ch: utils.aio.Chan[str]
     audio_ch: utils.aio.Chan[rtc.AudioFrame]
     audio_transcript: str = ""
+    modalities: asyncio.Future[list[Literal["text", "audio"]]] | None = None
 
 
 @dataclass
@@ -1054,10 +1055,11 @@ class RealtimeSession(
         self,
         *,
         message_id: str,
+        modalities: list[Literal["text", "audio"]],
         audio_end_ms: int,
         audio_transcript: NotGivenOr[str] = NOT_GIVEN,
     ) -> None:
-        if self._realtime_model.capabilities.audio_output:
+        if "audio" in modalities:
             self.send_event(
                 ConversationItemTruncateEvent(
                     type="conversation.item.truncate",
@@ -1157,22 +1159,29 @@ class RealtimeSession(
         assert (item_type := event.item.type) is not None, "item.type is None"
 
         if item_type == "message":
+            if item_id in self._current_generation.messages:
+                # 已惰性创建过，避免重复发送
+                return
+            modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = asyncio.Future()
             item_generation = _MessageGeneration(
                 message_id=item_id,
                 text_ch=utils.aio.Chan(),
                 audio_ch=utils.aio.Chan(),
+                modalities=modalities_fut,
             )
             if not self._realtime_model.capabilities.audio_output:
                 item_generation.audio_ch.close()
+                item_generation.modalities.set_result(["text"])  # type: ignore[union-attr]
 
+            self._current_generation.messages[item_id] = item_generation
             self._current_generation.message_ch.send_nowait(
                 llm.MessageGeneration(
                     message_id=item_id,
                     text_stream=item_generation.text_ch,
                     audio_stream=item_generation.audio_ch,
+                    modalities=item_generation.modalities,
                 )
             )
-            self._current_generation.messages[item_id] = item_generation
 
     def _handle_response_content_part_done(
         self, event: ResponseContentPartDoneEvent
@@ -1272,7 +1281,35 @@ class RealtimeSession(
 
     def _handle_response_audio_delta(self, event: ResponseAudioDeltaEvent) -> None:
         assert self._current_generation is not None, "current_generation is None"
+        if event.item_id not in self._current_generation.messages:
+            # 某些情况下 provider 可能先到 audio.delta，再到 output_item.added
+            modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = asyncio.Future()
+            temp_generation = _MessageGeneration(
+                message_id=event.item_id or utils.shortuuid(),
+                text_ch=utils.aio.Chan(),
+                audio_ch=utils.aio.Chan(),
+                modalities=modalities_fut,
+            )
+            if not self._realtime_model.capabilities.audio_output:
+                temp_generation.audio_ch.close()
+                temp_generation.modalities.set_result(["text"])  # type: ignore[union-attr]
+            else:
+                temp_generation.modalities.set_result(["audio", "text"])  # type: ignore[union-attr]
+
+            self._current_generation.messages[event.item_id] = temp_generation
+            # 立即发送 MessageGeneration，确保下游能消费音频
+            self._current_generation.message_ch.send_nowait(
+                llm.MessageGeneration(
+                    message_id=temp_generation.message_id,
+                    text_stream=temp_generation.text_ch,
+                    audio_stream=temp_generation.audio_ch,
+                    modalities=temp_generation.modalities,
+                )
+            )
         item_generation = self._current_generation.messages[event.item_id]
+        # 确保在首次收到音频时，及时声明 modalities 包含 audio，避免下游等待未决的 Future
+        if item_generation.modalities and not item_generation.modalities.done():
+            item_generation.modalities.set_result(["audio", "text"])  # type: ignore[union-attr]
 
         data = base64.b64decode(event.delta)
         item_generation.audio_ch.send_nowait(
@@ -1313,6 +1350,20 @@ class RealtimeSession(
                 )
             )
         elif item_type == "message":
+            if item_id not in self._current_generation.messages:
+                # 若之前未创建，也在此兜底创建，防止 KeyError
+                modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = asyncio.Future()
+                self._current_generation.messages[item_id] = _MessageGeneration(
+                    message_id=item_id,
+                    text_ch=utils.aio.Chan(),
+                    audio_ch=utils.aio.Chan(),
+                    modalities=modalities_fut,
+                )
+                if not self._realtime_model.capabilities.audio_output:
+                    self._current_generation.messages[item_id].audio_ch.close()
+                    self._current_generation.messages[item_id].modalities.set_result(["text"])  # type: ignore[union-attr]
+                else:
+                    self._current_generation.messages[item_id].modalities.set_result(["audio", "text"])  # type: ignore[union-attr]
             item_generation = self._current_generation.messages[item_id]
             item_generation.text_ch.close()
             item_generation.audio_ch.close()
