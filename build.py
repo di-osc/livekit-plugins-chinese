@@ -7,7 +7,7 @@ from jsonargparse import auto_cli
 load_dotenv()
 
 
-def run(version: str, publish: bool = True):
+def run(version: str, publish: bool = False):
     dist_dir = Path("dist")
     if not dist_dir.exists():
         dist_dir.mkdir()
@@ -23,7 +23,7 @@ def run(version: str, publish: bool = True):
         print(f"Building {plugin_name} for version {version}")
         # 修改livekit-agent版本
         # agent_version = version.split(".post")[0]
-        os.system(f'''cd {plugin} && uv add "livekit-agents==1.2.2"''')
+        os.system(f'''cd {plugin} && uv add "livekit-agents>={version}"''')
         # 修改version.py文件
         with open(plugin / f"livekit/plugins/{plugin_name}" / "version.py", "w") as f:
             f.write(f'''__version__ = "{version}"''')
