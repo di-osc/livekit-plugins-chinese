@@ -164,6 +164,7 @@ class RealtimeModel(llm.RealtimeModel):
     def __init__(
         self,
         *,
+        model: str = "step-1o-audio",
         voice: str = "ganliannvsheng",
         modalities: NotGivenOr[list[Literal["text", "audio"]]] = NOT_GIVEN,
         temperature: NotGivenOr[float] = NOT_GIVEN,
@@ -224,6 +225,7 @@ class RealtimeModel(llm.RealtimeModel):
             if is_given(max_session_duration)
             else DEFAULT_MAX_SESSION_DURATION,
             conn_options=conn_options,
+            model=model,
         )
         self._http_session = http_session
         self._http_session_owned = False
