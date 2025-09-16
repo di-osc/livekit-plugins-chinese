@@ -28,19 +28,6 @@ from livekit.agents.types import (
 
 from .log import logger
 
-# When a response is created with the OpenAI Realtime API, those events are sent in this order:
-# 1. response.created (contains resp_id)
-# 2. response.output_item.added (contains item_id)
-# 3. conversation.item.created
-# 4. response.content_part.added (type audio/text)
-# 5. response.audio_transcript.delta (x2, x3, x4, etc)
-# 6. response.audio.delta (x2, x3, x4, etc)
-# 7. response.content_part.done
-# 8. response.output_item.done (contains item_status: "completed/incomplete")
-# 9. response.done (contains status_details for cancelled/failed/turn_detected/content_filter)
-#
-# Ourcode assumes a response will generate only one item with type "message"
-
 
 PROTOCOL_VERSION = 0b0001
 DEFAULT_HEADER_SIZE = 0b0001
@@ -189,6 +176,13 @@ class _RealtimeOptions:
     sample_rate: int = 24000
     num_channels: int = 1
     format: str = "pcm"
+    model: Literal["O", "SC"]  = "O"
+    character_manifest: str = None
+    end_smooth_window_ms: int = 500
+    enable_volc_websearch: bool = False
+    volc_websearch_type: Literal["web_summary", "web"] = "web_summary"
+    volc_websearch_api_key: str = None
+    volc_websearch_no_result_message: str = "抱歉，我找不到相关信息。"
 
     @property
     def ws_url(self) -> str:
@@ -206,6 +200,11 @@ class _RealtimeOptions:
 
     def get_start_session_reqs(self):
         start_session_req = {
+            "asr": {
+                "extra": {
+                    "end_smooth_window_ms": self.end_smooth_window_ms,
+                }
+            },
             "tts": {
                 "audio_config": {
                     "channel": self.num_channels,
@@ -217,7 +216,15 @@ class _RealtimeOptions:
                 "bot_name": self.bot_name,
                 "system_role": self.system_role,
                 "speaking_style": self.speaking_style,
-                "extra": {"strict_audit": False},
+                "character_manifest": self.character_manifest,
+                "extra": {
+                    "strict_audit": False,
+                    "enable_volc_websearch": self.enable_volc_websearch,
+                    "volc_websearch_type": self.volc_websearch_type,
+                    "volc_websearch_api_key": self.volc_websearch_api_key,
+                    "volc_websearch_no_result_message": self.volc_websearch_no_result_message,
+                    "model": self.model,
+                },
             },
         }
         return start_session_req
@@ -252,12 +259,40 @@ class RealtimeModel(llm.RealtimeModel):
         system_role: str = "你是一个语音助手。",
         opening: str = "你好啊，今天过得怎么样？",
         speaking_style: str = "你的说话风格简洁明了，语速适中，语调自然。",
+        character_manifest: str = None,
+        model: Literal["O", "SC"]  = "O",
+        end_smooth_window_ms: int = 500,
+        enable_volc_websearch: bool = False,
+        volc_websearch_type: Literal["web_summary", "web"] = "web_summary",
+        volc_websearch_api_key: str = None,
+        volc_websearch_no_result_message: str = "抱歉，我找不到相关信息。",
         app_id: str = None,
         access_token: str = None,
         http_session: aiohttp.ClientSession | None = None,
         max_session_duration: NotGivenOr[float | None] = NOT_GIVEN,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> None:
+        """
+        Create a new instance of Volcengine Realtime Model.
+
+        Args:
+            bot_name (str, optional): 机器人名称. Defaults to "豆包".
+            system_role (str, optional): 系统角色. Defaults to "你是一个语音助手。".
+            opening (str, optional): 开场白. Defaults to "你好啊，今天过得怎么样？".
+            speaking_style (str, optional): 说话风格. Defaults to "你的说话风格简洁明了，语速适中，语调自然。".
+            character_manifest (str, optional): 角色描述. Defaults to None.
+            model (Literal[&quot;O&quot;, &quot;SC&quot;], optional): 模型类型. Defaults to "O".
+            end_smooth_window_ms (int, optional): 结束平滑窗口时间. Defaults to 500.
+            enable_volc_websearch (bool, optional): 是否启用火山搜索. Defaults to False.
+            volc_websearch_type (Literal[&quot;web_summary&quot;, &quot;web&quot;], optional): 火山搜索类型. Defaults to "web_summary".
+            volc_websearch_api_key (str, optional): 火山搜索API密钥. Defaults to None.
+            volc_websearch_no_result_message (str, optional): 火山搜索无结果消息. Defaults to "抱歉，我找不到相关信息。".
+            app_id (str, optional): 火山应用ID. Defaults to None.
+            access_token (str, optional): 火山访问令牌. Defaults to None.
+            http_session (aiohttp.ClientSession | None, optional): HTTP会话. Defaults to None.
+            max_session_duration (NotGivenOr[float  |  None], optional): 最大会话持续时间. Defaults to NOT_GIVEN.
+            conn_options (APIConnectOptions, optional): 连接选项. Defaults to DEFAULT_API_CONNECT_OPTIONS.
+        """
         super().__init__(
             capabilities=llm.RealtimeCapabilities(
                 message_truncation=True,
@@ -267,7 +302,13 @@ class RealtimeModel(llm.RealtimeModel):
                 audio_output=True,
             )
         )
-
+        logger.info(f"Model: {model}")
+        logger.info(f"Character Manifest: {character_manifest}")
+        logger.info(f"End Smooth Window MS: {end_smooth_window_ms}")
+        logger.info(f"Enable Volc Websearch: {enable_volc_websearch}")
+        logger.info(f"Volc Websearch Type: {volc_websearch_type}")
+        logger.info(f"Volc Websearch API Key: {volc_websearch_api_key}")
+        logger.info(f"Volc Websearch No Result Message: {volc_websearch_no_result_message}")
         app_id = app_id or os.environ.get("VOLCENGINE_REALTIME_APP_ID")
         if app_id is None:
             raise ValueError("VOLCENGINE_REALTIME_APP_ID is required")
@@ -279,12 +320,19 @@ class RealtimeModel(llm.RealtimeModel):
         self._opts = _RealtimeOptions(
             app_id=app_id,
             access_token=access_token,
-            max_session_duration=max_session_duration,
-            conn_options=conn_options,
             bot_name=bot_name,
             system_role=system_role,
             opening=opening,
             speaking_style=speaking_style,
+            character_manifest=character_manifest,
+            model=model,
+            end_smooth_window_ms=end_smooth_window_ms,
+            enable_volc_websearch=enable_volc_websearch,
+            volc_websearch_type=volc_websearch_type,
+            volc_websearch_api_key=volc_websearch_api_key,
+            volc_websearch_no_result_message=volc_websearch_no_result_message,
+            max_session_duration=max_session_duration,
+            conn_options=conn_options,
         )
         self._http_session = http_session
         self._sessions = weakref.WeakSet[RealtimeSession]()
