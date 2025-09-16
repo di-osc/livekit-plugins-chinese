@@ -7,7 +7,7 @@ from jsonargparse import auto_cli
 load_dotenv()
 
 
-def run(version: str):
+def run(version: str, publish: bool = False):
     dist_dir = Path("dist")
     if not dist_dir.exists():
         dist_dir.mkdir()
@@ -22,16 +22,21 @@ def run(version: str):
         plugin_name = plugin.stem.replace("livekit-plugins-", "")
         print(f"Building {plugin_name} for version {version}")
         # 修改livekit-agent版本
-        agent_version = version.split(".post")[0]
-        os.system(f'''cd {plugin} && uv add "livekit-agents>={agent_version}"''')
+        # agent_version = version.split(".post")[0]
+        os.system(f'''cd {plugin} && uv add "livekit-agents>={version}"''')
         # 修改version.py文件
         with open(plugin / f"livekit/plugins/{plugin_name}" / "version.py", "w") as f:
             f.write(f'''__version__ = "{version}"''')
+            # 添加空行
+            f.write("\n")
         print(f"Building {plugin.name} for version {version}")
         os.system(f"cd {plugin} && uv build")
 
     pypi_token = os.getenv("PYPI_TOKEN")
-    if pypi_token:
+    if not pypi_token:
+        print("PYPI_TOKEN not set, skip publish")
+        return
+    if publish:
         os.system(f"uv publish --token {pypi_token}")
 
 

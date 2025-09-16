@@ -1,9 +1,9 @@
-## livekit-plugins-chinese
+# 简介
 
-为[livekit-agents](https://github.com/livekit/agents)**实时语音智能体**框架提供中文插件支持。
+该项目为[livekit-agents](https://github.com/livekit/agents)**实时语音智能体**框架提供中文插件支持以及[延迟测试](./benchmark/README.md)。
 
 
-## plugins
+## 插件列表
 
 | 厂商 | STT | TTS | LLM | Realtime | 使用说明 |
 | ---- | --- | --- | --- | --- | --- |
@@ -16,5 +16,6 @@
 | Dify | ❎ | ❎  | ✅  | ❎|[点击这里](livekit-plugins/livekit-plugins-dify) |
 | FlashTTS | ❎ | ✅  | ❎ | ❎ |[点击这里](livekit-plugins/livekit-plugins-flashtts) |
 | 阿里云 | ✅ | ✅  | ✅ | ❎ |[点击这里](livekit-plugins/livekit-plugins-aliyun) |
+| 阶跃星辰 | ❎ | ❎  | ❎ | ✅ |[点击这里](livekit-plugins/livekit-plugins-stepfun) |
 
 

@@ -1,5 +1,7 @@
-[tool.uv]
-constraint-dependencies = ['onnxruntime<1.20.0; python_version == "3.9"']
+[project]
+name = "livekit-plugins-chinese"
+version = "0.1.0"
+requires-python = ">=3.10"
 
 [tool.uv.sources]
 livekit-plugins-volcengine = { workspace = true }
@@ -28,6 +30,11 @@ dev = [
     "websockets>=15.0.1",
     "jsonargparse",
     "pyaudio>=0.2.14",
+    "srsly>=2.5.1",
+    "loguru>=0.7.3",
+    "polars>=1.33.0",
+    "livekit-plugins-wuba>=1.2.3",
+    "xlsxwriter>=3.2.5",
 ]
 
 [[tool.uv.index]]
