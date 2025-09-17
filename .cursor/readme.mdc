@@ -1,0 +1,20 @@
+---
+description: 针对各个插件README.md文件的规则以及模版
+alwaysApply: true
+---
+
+需要按照下面的模板完成各个插件的README.md文件。
+
+```markdown
+# livekit-plugins-xx
+
+## 📋 服务
+
+## 🛠️ 安装
+
+## ⚙️ 环境变量
+
+## 使用指南
+
+## API参考
+```
