@@ -10,7 +10,7 @@ keywords = ["webrtc", "realtime", "audio", "video", "livekit"]
 requires-python = ">=3.9"
 dependencies = [
     "openai>=1.75.0",
-    "osc-data>=0.2.2",
+    "osc-data==0.2.2",
     "pydantic",
     "numpy",
     "livekit-agents>=1.2.8",

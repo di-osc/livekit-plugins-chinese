@@ -11,7 +11,7 @@ import gzip
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Callable
 
 import aiohttp
 import numpy as np
@@ -272,6 +272,7 @@ class RealtimeModel(llm.RealtimeModel):
         volc_websearch_type: Literal["web_summary", "web"] = "web_summary",
         volc_websearch_api_key: str = None,
         volc_websearch_no_result_message: str = "抱歉，我找不到相关信息。",
+        rag_fn: Callable[[str], str] = None,
         audio_output: bool = True,
         modalities: NotGivenOr[list[Literal["text", "audio"]]] = NOT_GIVEN,
         http_session: aiohttp.ClientSession | None = None,
@@ -286,6 +287,7 @@ class RealtimeModel(llm.RealtimeModel):
                 user_transcription=True,
                 auto_tool_reply_generation=False,
                 audio_output=("audio" in modalities),
+                manual_function_calls=True
             )
         )
         logger.info(f"Model: {model}")
@@ -324,6 +326,7 @@ class RealtimeModel(llm.RealtimeModel):
             max_session_duration=max_session_duration,
             conn_options=conn_options,
         )
+        self._rag_fn = rag_fn
         self._http_session = http_session
         self._sessions = weakref.WeakSet[RealtimeSession]()
 
@@ -613,6 +616,22 @@ class RealtimeSession(
                                 user_transcription_enabled=False
                             ),
                         )
+                        if self._realtime_model._rag_fn is not None:
+                            logger.info("rag start")
+                            rag_result = self._realtime_model._rag_fn(transcription)
+                            payload = {
+                                "external_rag": rag_result,
+                            }
+                            payload_bytes = str.encode(json.dumps(payload))
+                            payload_bytes = gzip.compress(payload_bytes)
+                            chat_rag_text_request = bytearray(generate_header())
+                            chat_rag_text_request.extend(int(502).to_bytes(4, "big"))
+                            chat_rag_text_request.extend((len(self.session_id)).to_bytes(4, "big"))
+                            chat_rag_text_request.extend(str.encode(self.session_id))
+                            chat_rag_text_request.extend((len(payload_bytes)).to_bytes(4, "big"))
+                            chat_rag_text_request.extend(payload_bytes)
+                            await ws_conn.send_bytes(chat_rag_text_request)
+                            logger.info("rag end")
                         logger.info("llm start")
                         logger.info("tts start")
 
