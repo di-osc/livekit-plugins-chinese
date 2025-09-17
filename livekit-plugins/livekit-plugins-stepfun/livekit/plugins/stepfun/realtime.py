@@ -1164,7 +1164,9 @@ class RealtimeSession(
             if item_id in self._current_generation.messages:
                 # 已惰性创建过，避免重复发送
                 return
-            modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = asyncio.Future()
+            modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = (
+                asyncio.Future()
+            )
             item_generation = _MessageGeneration(
                 message_id=item_id,
                 text_ch=utils.aio.Chan(),
@@ -1285,7 +1287,9 @@ class RealtimeSession(
         assert self._current_generation is not None, "current_generation is None"
         if event.item_id not in self._current_generation.messages:
             # 某些情况下 provider 可能先到 audio.delta，再到 output_item.added
-            modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = asyncio.Future()
+            modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = (
+                asyncio.Future()
+            )
             temp_generation = _MessageGeneration(
                 message_id=event.item_id or utils.shortuuid(),
                 text_ch=utils.aio.Chan(),
@@ -1354,7 +1358,9 @@ class RealtimeSession(
         elif item_type == "message":
             if item_id not in self._current_generation.messages:
                 # 若之前未创建，也在此兜底创建，防止 KeyError
-                modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = asyncio.Future()
+                modalities_fut: asyncio.Future[list[Literal["text", "audio"]]] = (
+                    asyncio.Future()
+                )
                 self._current_generation.messages[item_id] = _MessageGeneration(
                     message_id=item_id,
                     text_ch=utils.aio.Chan(),
@@ -1363,9 +1369,13 @@ class RealtimeSession(
                 )
                 if not self._realtime_model.capabilities.audio_output:
                     self._current_generation.messages[item_id].audio_ch.close()
-                    self._current_generation.messages[item_id].modalities.set_result(["text"])  # type: ignore[union-attr]
+                    self._current_generation.messages[item_id].modalities.set_result(
+                        ["text"]
+                    )  # type: ignore[union-attr]
                 else:
-                    self._current_generation.messages[item_id].modalities.set_result(["audio", "text"])  # type: ignore[union-attr]
+                    self._current_generation.messages[item_id].modalities.set_result(
+                        ["audio", "text"]
+                    )  # type: ignore[union-attr]
             item_generation = self._current_generation.messages[item_id]
             item_generation.text_ch.close()
             item_generation.audio_ch.close()

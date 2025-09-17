@@ -287,7 +287,7 @@ class RealtimeModel(llm.RealtimeModel):
                 user_transcription=True,
                 auto_tool_reply_generation=False,
                 audio_output=("audio" in modalities),
-                manual_function_calls=True
+                manual_function_calls=True,
             )
         )
         logger.info(f"Model: {model}")
@@ -626,9 +626,13 @@ class RealtimeSession(
                             payload_bytes = gzip.compress(payload_bytes)
                             chat_rag_text_request = bytearray(generate_header())
                             chat_rag_text_request.extend(int(502).to_bytes(4, "big"))
-                            chat_rag_text_request.extend((len(self.session_id)).to_bytes(4, "big"))
+                            chat_rag_text_request.extend(
+                                (len(self.session_id)).to_bytes(4, "big")
+                            )
                             chat_rag_text_request.extend(str.encode(self.session_id))
-                            chat_rag_text_request.extend((len(payload_bytes)).to_bytes(4, "big"))
+                            chat_rag_text_request.extend(
+                                (len(payload_bytes)).to_bytes(4, "big")
+                            )
                             chat_rag_text_request.extend(payload_bytes)
                             await ws_conn.send_bytes(chat_rag_text_request)
                             logger.info("rag end")
