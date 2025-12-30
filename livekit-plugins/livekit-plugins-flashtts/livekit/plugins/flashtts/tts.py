@@ -83,6 +83,10 @@ class TTSOptions(BaseModel):
             "Note: PCM returns raw 16-bit samples without headers and AAC is not currently supported."
         ),
     )
+    extra_headers: Dict[str, str] = Field(
+        default={},
+        description="Extra headers to be sent with the request.",
+    )
 
     def get_http_url(self) -> str:
         return f"{self.base_url}/speak"
@@ -91,6 +95,7 @@ class TTSOptions(BaseModel):
         return {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
+            **self.extra_headers,
         }
 
     def get_query_params(self, text: str) -> Dict:
@@ -122,6 +127,7 @@ class TTS(tts.TTS):
         repetition_penalty: float = 1.0,
         max_tokens: int = 32768,
         http_session: aiohttp.ClientSession | None = None,
+        extra_headers: Dict[str, str] = {},
     ):
         """flashtts
 
@@ -139,6 +145,7 @@ class TTS(tts.TTS):
             max_tokens (int, optional): Max tokens. Defaults to 4096.
             stream (bool, optional): Stream. Defaults to False.
             http_session (aiohttp.ClientSession | None, optional): HTTP session. Defaults to None.
+            extra_headers (Dict[str, str], optional): Extra headers to be sent with the request. Defaults to {}.
         """
         super().__init__(
             capabilities=tts.TTSCapabilities(streaming=True),
@@ -157,6 +164,7 @@ class TTS(tts.TTS):
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             max_tokens=max_tokens,
+            extra_headers=extra_headers,
         )
         self._session = http_session
         self._streams = weakref.WeakSet[SynthesizeStream]()
