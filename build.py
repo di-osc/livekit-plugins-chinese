@@ -7,7 +7,9 @@ from jsonargparse import auto_cli
 load_dotenv()
 
 
-def run(version: str, publish: bool = False, agent_version: str = "1.2.9"):
+def run(version: str | None = None, publish: bool = False, agent_version: str = "1.3.10"):
+    if version is None:
+        version = agent_version
     dist_dir = Path("dist")
     if not dist_dir.exists():
         dist_dir.mkdir()
@@ -22,7 +24,7 @@ def run(version: str, publish: bool = False, agent_version: str = "1.2.9"):
         plugin_name = plugin.stem.replace("livekit-plugins-", "")
         print(f"Building {plugin_name} for version {version}")
         # 修改livekit-agent版本
-        os.system(f'''cd {plugin} && uv add "livekit-agents=={agent_version}"''')
+        os.system(f'''cd {plugin} && uv add "livekit-agents=={agent_version}" --frozen''')
         # 修改version.py文件
         with open(plugin / f"livekit/plugins/{plugin_name}" / "version.py", "w") as f:
             f.write(f'''__version__ = "{version}"''')
