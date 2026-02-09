@@ -21,15 +21,16 @@ from .log import logger
 
 class TTSOptions(BaseModel):
     api_key: str
-    group_id: str
     base_url: str = "https://api.minimax.chat/v1/t2a_v2"
     model: Literal[
+        "speech-2.8-hd",
+        "speech-2.8-turbo",
+        "speech-2.6-hd",
+        "speech-2.6-turbo",
         "speech-02-hd",
         "speech-02-turbo",
         "speech-01-hd",
         "speech-01-turbo",
-        "speech-01-240228",
-        "speech-01-turbo-240228",
     ] = "speech-02-hd"
     language_boost: Literal[
         "Chinese",
@@ -119,7 +120,7 @@ class TTSOptions(BaseModel):
     ] = "male-qn-jingying"
 
     def get_http_url(self):
-        return f"{self.base_url}?GroupId={self.group_id}"
+        return f"{self.base_url}"
 
     def get_http_header(self):
         headers = {
@@ -154,14 +155,15 @@ class TTS(tts.TTS):
     def __init__(
         self,
         api_key: str | None = None,
-        group_id: str | None = None,
         model: Literal[
+            "speech-2.8-hd",
+            "speech-2.8-turbo",
+            "speech-2.6-hd",
+            "speech-2.6-turbo",
             "speech-02-hd",
             "speech-02-turbo",
             "speech-01-hd",
             "speech-01-turbo",
-            "speech-01-240228",
-            "speech-01-turbo-240228",
         ] = "speech-02-turbo",
         language_boost: Literal[
             "Chinese",
@@ -248,15 +250,12 @@ class TTS(tts.TTS):
             "Serene_Woman",
         ] = "male-qn-jingying",
         http_session: aiohttp.ClientSession | None = None,
-        max_session_duration: float = 600,
     ):
         """mininax TTS
 
         Args:
             api_key (str | None, optional):  API key. Defaults to None.
-            group_id (str | None, optional):  Group ID. Defaults to None.
-            base_url (str | None, optional):  Base URL. Defaults to None.
-            model (Literal[ "speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo", "speech-01-240228", "speech-01-turbo-240228" ], optional):  Model. Defaults to "speech-02-hd".
+            model (Literal[ "speech-2.8-hd", "speech-2.8-turbo", "speech-2.6-hd", "speech-2.6-turbo", "speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo" ], optional):  Model. Defaults to "speech-02-turbo".
 
         """
         super().__init__(
@@ -266,10 +265,8 @@ class TTS(tts.TTS):
         )
         if api_key is None:
             api_key = os.environ.get("MINIMAX_API_KEY")
-        if group_id is None:
-            group_id = os.environ.get("MINIMAX_GROUP_ID")
-        if api_key is None or group_id is None:
-            raise ValueError("MINIMAX_API_KEY and MINIMAX_GROUP_ID must be provided")
+        if api_key is None:
+            raise ValueError("MINIMAX_API_KEY must be provided")
         self._opts = TTSOptions(
             api_key=api_key,
             group_id=group_id,
