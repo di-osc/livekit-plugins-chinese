@@ -21,7 +21,6 @@ from .log import logger
 
 class TTSOptions(BaseModel):
     api_key: str
-    group_id: str
     base_url: str = "https://api.minimax.chat/v1/t2a_v2"
     model: Literal[
         "speech-02-hd",
@@ -119,7 +118,7 @@ class TTSOptions(BaseModel):
     ] = "male-qn-jingying"
 
     def get_http_url(self):
-        return f"{self.base_url}?GroupId={self.group_id}"
+        return f"{self.base_url}"
 
     def get_http_header(self):
         headers = {
@@ -268,8 +267,8 @@ class TTS(tts.TTS):
             api_key = os.environ.get("MINIMAX_API_KEY")
         if group_id is None:
             group_id = os.environ.get("MINIMAX_GROUP_ID")
-        if api_key is None or group_id is None:
-            raise ValueError("MINIMAX_API_KEY and MINIMAX_GROUP_ID must be provided")
+        if api_key is None:
+            raise ValueError("MINIMAX_API_KEY must be provided")
         self._opts = TTSOptions(
             api_key=api_key,
             group_id=group_id,
