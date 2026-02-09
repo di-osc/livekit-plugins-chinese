@@ -269,7 +269,6 @@ class TTS(tts.TTS):
             raise ValueError("MINIMAX_API_KEY must be provided")
         self._opts = TTSOptions(
             api_key=api_key,
-            group_id=group_id,
             model=model,
             language_boost=language_boost,
             sample_rate=sample_rate,
