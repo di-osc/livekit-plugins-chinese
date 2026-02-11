@@ -78,6 +78,10 @@ class STTOptions:
     def language(self):
         return self.engine_model_type.split("_")[1]
 
+    def get_finish_params(self) -> str:
+        """Return the finish message to send when ending the stream."""
+        return json.dumps({"type": "end"})
+
 
 class STT(stt.STT):
     def __init__(
