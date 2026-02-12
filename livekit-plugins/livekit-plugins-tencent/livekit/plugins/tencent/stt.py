@@ -70,6 +70,7 @@ class STTOptions:
             "needvad": self.need_vad,
             "vad_silence_time": self.vad_silence_time,
             "voice_format": self.voice_format,
+            "noise_threshold": self.noise_threshold,
         }
         # 返回字典排序
         return dict(sorted(params.items(), key=lambda x: x[0]))
@@ -90,9 +91,26 @@ class STT(stt.STT):
         app_id: int = None,
         secret_key: str = None,
         secret_id: str = None,
+        noise_threshold: float = 0.5,
+        vad_silence_time: int = 500,
         http_session: aiohttp.ClientSession | None = None,
         interim_results: bool = True,
     ) -> None:
+        """
+        Initialize Tencent Cloud STT.
+
+        Args:
+            app_id: Tencent Cloud app ID
+            secret_key: Tencent Cloud secret key
+            secret_id: Tencent Cloud secret ID
+            noise_threshold: Noise detection threshold [-1, 1]. Higher values = more likely
+                classified as noise (filters out quiet sounds). Lower values = more likely
+                classified as speech. Default 0.5.
+            vad_silence_time: Silence duration threshold in ms [240-2000]. Speech segments
+                are split when silence exceeds this duration. Default 500ms.
+            http_session: Optional aiohttp session
+            interim_results: Whether to return interim transcription results
+        """
         super().__init__(
             capabilities=stt.STTCapabilities(
                 streaming=True, interim_results=interim_results
@@ -111,6 +129,8 @@ class STT(stt.STT):
             app_id=self.app_id,
             secret_id=self.secret_id,
             secret_key=self.secret_key,
+            noise_threshold=noise_threshold,
+            vad_silence_time=vad_silence_time,
         )
 
         self._session = http_session
@@ -260,7 +280,13 @@ class SpeechStream(stt.SpeechStream):
             self._session.ws_connect(self._opts.get_ws_url()),
             self._conn_options.timeout,
         )
-        logger.info("connected to stt websocket successfully")
+        logger.info(
+            "connected to stt websocket successfully",
+            extra={
+                "noise_threshold": self._opts.noise_threshold,
+                "vad_silence_time": self._opts.vad_silence_time,
+            },
+        )
         return ws
 
     def _on_audio_duration_report(self, duration: float) -> None:
