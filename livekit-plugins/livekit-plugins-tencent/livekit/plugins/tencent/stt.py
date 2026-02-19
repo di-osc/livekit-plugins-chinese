@@ -28,6 +28,9 @@ from livekit.agents.types import (
 )
 from livekit.agents.utils import AudioBuffer, shortuuid
 
+from .common import Credential
+from . import asr
+
 from .log import logger
 
 
@@ -47,6 +50,7 @@ class STTOptions:
     noise_threshold: float = 0.5  # 噪音参数阈值，默认为0，取值范围：[-1,1]，对于一些音频片段，取值越大，判定为噪音情况越大。取值越小，判定为人声情况越大。
 
     base_url: str = "wss://asr.cloud.tencent.com/asr/v2/"
+    http_url: str = "https://asr.cloud.tencent.com/asr/v1/"
 
     def get_ws_url(self):
         params = self.get_params()
@@ -58,6 +62,18 @@ class STTOptions:
         s = s.decode("utf-8")
         urlencoded_s = urlencode({"signature": s})
         return url + "&" + urlencoded_s
+
+    def get_http_url(self):
+        params = self.get_params()
+        url = self.http_url + str(self.app_id) + "?" + urlencode(params)
+        return url
+
+    def get_signature(self, url: str) -> str:
+        hmacstr = hmac.new(
+            self.secret_key.encode("utf-8"), url[8:].encode("utf-8"), hashlib.sha1
+        ).digest()
+        s = base64.b64encode(hmacstr)
+        return s.decode("utf-8")
 
     def get_params(self):
         params = {
@@ -95,6 +111,7 @@ class STT(stt.STT):
         vad_silence_time: int = 500,
         http_session: aiohttp.ClientSession | None = None,
         interim_results: bool = True,
+        streaming: bool = True,
     ) -> None:
         """
         Initialize Tencent Cloud STT.
@@ -110,10 +127,12 @@ class STT(stt.STT):
                 are split when silence exceeds this duration. Default 500ms.
             http_session: Optional aiohttp session
             interim_results: Whether to return interim transcription results
+            streaming: Whether to use streaming (WebSocket) API. If False, uses HTTP API
+                which requires external VAD to segment audio. Default True.
         """
         super().__init__(
             capabilities=stt.STTCapabilities(
-                streaming=True, interim_results=interim_results
+                streaming=streaming, interim_results=interim_results
             )
         )
 
@@ -135,6 +154,7 @@ class STT(stt.STT):
 
         self._session = http_session
         self._streams = weakref.WeakSet[SpeechStream]()
+        self._streaming = streaming
 
     def _ensure_session(self) -> aiohttp.ClientSession:
         if not self._session:
@@ -149,7 +169,70 @@ class STT(stt.STT):
         language: NotGivenOr[str] = NOT_GIVEN,
         conn_options: APIConnectOptions,
     ) -> stt.SpeechEvent:
-        raise NotImplementedError("not implemented")
+        if self._streaming:
+            raise NotImplementedError(
+                "Streaming mode is enabled. Use stream() method instead."
+            )
+
+        frame = rtc.combine_audio_frames(buffer)
+        audio_bytes = frame.data.tobytes()
+
+        cred = Credential(self._opts.secret_id, self._opts.secret_key)
+        recognizer = asr.FlashRecognizer(self._opts.app_id, cred)
+
+        engine_type = self._opts.engine_model_type
+        req = asr.FlashRecognitionRequest(engine_type)
+        req.set_filter_modal(0)
+        req.set_filter_punc(0)
+        req.set_filter_dirty(0)
+        req.set_voice_format("pcm")
+        req.set_word_info(0)
+        req.set_convert_num_mode(1)
+
+        result_data = await asyncio.to_thread(recognizer.recognize, req, audio_bytes)
+        result = json.loads(result_data)
+
+        request_id = result.get("request_id", shortuuid())
+        result_code = result.get("code", 0)
+        result_msg = result.get("message", None)
+
+        if result_code != 0:
+            logger.warning(
+                "failed to recognize speech",
+                extra={"result_code": result_code, "result_msg": result_msg},
+            )
+            return stt.SpeechEvent(
+                type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                request_id=request_id,
+                alternatives=[],
+            )
+
+        text = ""
+        audio_duration = 0
+        flash_result = result.get("flash_result", [])
+        if flash_result:
+            text = flash_result[0].get("text", "")
+            sentence_list = flash_result[0].get("sentence_list", [])
+            if sentence_list:
+                audio_duration = sentence_list[-1].get("end_time", 0) // 1000
+
+        alternatives = [
+            stt.SpeechData(
+                language=self._opts.language,
+                text=text,
+                start_time=0,
+                end_time=audio_duration,
+            )
+        ]
+
+        event = stt.SpeechEvent(
+            type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+            request_id=request_id,
+            alternatives=alternatives,
+            recognition_usage=stt.RecognitionUsage(audio_duration=audio_duration),
+        )
+
+        return event
 
     def stream(
         self,
@@ -157,6 +240,11 @@ class STT(stt.STT):
         language: NotGivenOr[str] = NOT_GIVEN,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> SpeechStream:
+        if not self._streaming:
+            raise RuntimeError(
+                "Streaming is disabled. Use recognize() method for non-streaming mode."
+            )
+
         stream = SpeechStream(
             stt=self,
             conn_options=conn_options,
