@@ -14,14 +14,14 @@
 - `volcengine.TTS` 不再需要 `cluster` 参数
 - `volcengine.TTS` 默认 `resource_id="seed-tts-2.0"`
 - `volcengine.TTS` 默认音色为 `zh_female_xiaohe_uranus_bigtts`
-- `BigModelSTT` 已补齐新版握手头 `X-Api-Connect-Id`
+- `volcengine.STT` 现已直接使用豆包大模型流式语音识别接口
+- `volcengine.STT` 已补齐新版握手头 `X-Api-Connect-Id`
 
 ## ✨ 特性
 
-- 🎤 **语音识别 (STT)** - 支持火山引擎语音识别服务
-- 🗣️ **语音合成 (TTS)** - 支持火山引擎文本转语音服务
+- 🎤 **语音识别 (STT)** - 使用豆包大模型流式语音识别服务
+- 🗣️ **语音合成 (TTS)** - 使用豆包语音合成大模型服务
 - 🤖 **大语言模型 (LLM)** - 支持豆包大模型系列
-- 🎯 **大模型语音识别 (BigModelSTT)** - 增强版语音识别服务
 - ⚡ **实时语音模型 (Realtime)** - 端到端实时语音交互
 - 🔧 **简单集成** - 与 LiveKit Agents 框架无缝集成
 - 📦 **开箱即用** - 完整的 Python 包支持
@@ -30,9 +30,8 @@
 
 | 服务 | 描述 | 文档链接 |
 |------|------|----------|
-| TTS | 文本转语音 | [语音合成大模型 API 列表](https://www.volcengine.com/docs/6561/1257584) |
-| STT | 语音识别 | [语音识别](https://www.volcengine.com/docs/6561/80818) |
-| BigModelSTT | 大模型语音识别 | [大模型语音识别](https://www.volcengine.com/docs/6561/1354869) |
+| TTS | 豆包语音合成大模型，当前实现使用 V3 HTTP Chunked 单向流式接口 | [语音合成大模型 API 列表](https://www.volcengine.com/docs/6561/1257584) |
+| STT | 豆包大模型流式语音识别，当前实现使用 `/api/v3/sauc/bigmodel` WebSocket 接口 | [大模型语音识别](https://www.volcengine.com/docs/6561/1354869) |
 | LLM | 大语言模型 | [流式调用](https://www.volcengine.com/docs/82379/1298454) |
 | Realtime | 实时语音模型 | [实时语音](https://www.volcengine.com/docs/6561/1594356) |
 
@@ -120,7 +119,7 @@ if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entry_point))
 ```
 
-### 大模型语音识别
+### STT
 
 ```python
 from livekit.agents import Agent, AgentSession, JobContext, cli, WorkerOptions
@@ -130,8 +129,8 @@ from dotenv import load_dotenv
 async def entry_point(ctx: JobContext):
     agent = Agent(instructions="You are a helpful assistant.")
 
-    # 使用大模型语音识别
-    stt = volcengine.BigModelSTT(app_id="your_app_id")
+    # 使用豆包大模型流式语音识别
+    stt = volcengine.STT(app_id="your_app_id")
 
     session = AgentSession(
         stt=stt,
@@ -346,7 +345,7 @@ async def entry_point(ctx: JobContext):
         # 语音识别
         stt=volcengine.STT(
             app_id="your_stt_app_id",
-            cluster="your_cluster"
+            resource_id="volc.seedasr.sauc.duration"
         ),
         # 语音合成
         tts=volcengine.TTS(
@@ -369,6 +368,8 @@ if __name__ == "__main__":
 ## 🔧 API 参考
 
 ### TTS (文本转语音)
+
+当前 `volcengine.TTS` 使用的是豆包语音合成大模型，接入方式为 V3 HTTP Chunked 单向流式接口。
 
 ```python
 volcengine.TTS(
@@ -394,22 +395,20 @@ volcengine.TTS(
 
 ### STT (语音识别)
 
+当前 `volcengine.STT` 使用的是豆包大模型流式语音识别 WebSocket 接口。
+
 ```python
 volcengine.STT(
-    app_id: str,           # 应用ID
-    cluster: str,          # 集群ID
-    language: str = "zh-CN"  # 语言
-)
-```
-
-### BigModelSTT (大模型语音识别)
-
-```python
-volcengine.BigModelSTT(
-    app_id: str,           # 应用ID
-    cluster: str = "volcengine_streaming_common",  # 集群
-    protocol: str = "http",  # 协议
-    language: str = "zh-CN"  # 语言
+    app_id: str | None = None,
+    access_token: str | None = None,
+    resource_id: str | None = None,  # 例如 volc.bigasr.sauc.duration / volc.seedasr.sauc.duration
+    model_name: str = "bigmodel",
+    enable_itn: bool = False,
+    enable_punc: bool = True,
+    enable_ddc: bool = False,
+    vad_segment_duration: int = 3000,
+    end_window_size: int = 500,
+    force_to_speech_time: int = 1000,
 )
 ```
 
@@ -565,7 +564,8 @@ A: 根据您的应用需求选择合适的版本：
 - `volcengine.TTS` 默认音色改为 `zh_female_xiaohe_uranus_bigtts`
 - 修复 V3 TTS 流式响应解析，按 JSON chunk 解码 base64 音频
 - 修复无音频返回时静默失败的问题
-- `BigModelSTT` 补齐 `X-Api-Connect-Id` 握手头
+- 删除旧版普通 STT，实现统一为豆包大模型流式语音识别
+- `volcengine.STT` 补齐 `X-Api-Connect-Id` 握手头
 
 ## 🤝 贡献
 
