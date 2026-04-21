@@ -242,7 +242,7 @@ class SynthesizeStream(tts.SynthesizeStream):
                             extra={"spent": str(first_sentence_spend)},
                         )
                     first_response_spend = None
-                    emitter.start_segment(segment_id=utils.shortuuid)
+                    emitter.start_segment(segment_id=utils.shortuuid())
                     logger.info("tts start", extra={"sentence": sentence})
                     data = self._opts.get_query_params(text=sentence)
                     if first_response_spend is None:

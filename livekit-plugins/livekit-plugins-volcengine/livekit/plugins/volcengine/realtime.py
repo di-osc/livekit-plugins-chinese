@@ -177,11 +177,11 @@ class _RealtimeOptions:
     num_channels: int = 1
     format: str = "pcm"
     model: Literal["O", "SC"] = "O"
-    character_manifest: str = None
+    character_manifest: str | None = None
     end_smooth_window_ms: int = 500
     enable_volc_websearch: bool = False
     volc_websearch_type: Literal["web_summary", "web"] = "web_summary"
-    volc_websearch_api_key: str = None
+    volc_websearch_api_key: str | None = None
     volc_websearch_no_result_message: str = "抱歉，我找不到相关信息。"
 
     @property
@@ -790,7 +790,7 @@ class RealtimeSession(
     ) -> None:
         pass
 
-    async def update_tools(self, tools):
+    async def update_tools(self, tools: list[llm.Tool]) -> None:
         pass
 
     async def update_chat_ctx(self, chat_ctx: llm.ChatContext) -> None:
@@ -822,7 +822,11 @@ class RealtimeSession(
         self._pushed_duration_s = 0
 
     def generate_reply(
-        self, *, instructions: NotGivenOr[str] = NOT_GIVEN
+        self,
+        *,
+        instructions: NotGivenOr[str] = NOT_GIVEN,
+        tool_choice: NotGivenOr[llm.ToolChoice] = NOT_GIVEN,
+        tools: NotGivenOr[list[llm.Tool]] = NOT_GIVEN,
     ) -> asyncio.Future[llm.GenerationCreatedEvent]:
         """仅文字输入"""
         event_id = utils.shortuuid("response_create_")

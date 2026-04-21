@@ -7,9 +7,9 @@ authors = [
     { name = "wangmengdi", email = "790990241@qq.com" }
 ]
 keywords = ["webrtc", "realtime", "audio", "video", "livekit"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
-    "livekit-agents>=1.4.0",
+    "livekit-agents==1.5.4",
     "requests>=2.25.0",
 ]
 
@@ -20,7 +20,6 @@ classifiers = [
     "Topic :: Multimedia :: Video",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3 :: Only",
 ]

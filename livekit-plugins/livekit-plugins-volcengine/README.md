@@ -1,10 +1,20 @@
 # livekit-plugins-volcengine
 
 [![PyPI version](https://badge.fury.io/py/livekit-plugins-volcengine.svg)](https://pypi.org/project/livekit-plugins-volcengine/)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
 
 火山引擎服务专用的 [LiveKit Agents](https://github.com/livekit/agents) 插件，提供完整的语音和语言模型集成解决方案。
+
+## 最近修改
+
+- 已升级到 `livekit-agents==1.5.4`
+- Python 要求已更新为 `>=3.10`
+- `volcengine.TTS` 已切换到豆包语音合成大模型 V3 HTTP Chunked 接口
+- `volcengine.TTS` 不再需要 `cluster` 参数
+- `volcengine.TTS` 默认 `resource_id="seed-tts-2.0"`
+- `volcengine.TTS` 默认音色为 `zh_female_xiaohe_uranus_bigtts`
+- `BigModelSTT` 已补齐新版握手头 `X-Api-Connect-Id`
 
 ## ✨ 特性
 
@@ -20,11 +30,20 @@
 
 | 服务 | 描述 | 文档链接 |
 |------|------|----------|
-| TTS | 文本转语音 | [语音合成](https://www.volcengine.com/docs/6561/79817) |
+| TTS | 文本转语音 | [语音合成大模型 API 列表](https://www.volcengine.com/docs/6561/1257584) |
 | STT | 语音识别 | [语音识别](https://www.volcengine.com/docs/6561/80818) |
 | BigModelSTT | 大模型语音识别 | [大模型语音识别](https://www.volcengine.com/docs/6561/1354869) |
 | LLM | 大语言模型 | [流式调用](https://www.volcengine.com/docs/82379/1298454) |
 | Realtime | 实时语音模型 | [实时语音](https://www.volcengine.com/docs/6561/1594356) |
+
+## 服务开通
+
+| 服务 | 开通/接入入口 |
+|------|---------------|
+| 豆包语音 | [快速入门（新版控制台）](https://www.volcengine.com/docs/6561/2119699?lang=zh) |
+| 豆包语音控制台 | [控制台](https://console.volcengine.com/speech/service/16) |
+| 火山方舟 LLM | [火山方舟文档](https://www.volcengine.com/docs/82379) |
+| 火山方舟控制台 | [Ark 控制台](https://console.volcengine.com/ark/) |
 
 ## 🛠️ 安装
 
@@ -44,8 +63,8 @@ pip install -e .
 
 ### 系统要求
 
-- Python >= 3.9
-- LiveKit Agents >= 1.2.9
+- Python >= 3.10
+- LiveKit Agents == 1.5.4
 
 ## ⚙️ 配置
 
@@ -59,6 +78,7 @@ pip install -e .
 | `VOLCENGINE_STT_ACCESS_TOKEN` | STT 服务的访问令牌 | [语音识别控制台](https://console.volcengine.com/speech/service/16) |
 | `VOLCENGINE_LLM_API_KEY` | LLM 服务的 API 密钥 | [大模型控制台](https://console.volcengine.com/ark/) |
 | `VOLCENGINE_REALTIME_ACCESS_TOKEN` | 实时服务的访问令牌 | [实时语音控制台](https://console.volcengine.com/speech/service/10011) |
+| `VOLCENGINE_TTS_RESOURCE_ID` | TTS 资源 ID，默认 `seed-tts-2.0` | [豆包语音合成接口文档](https://www.volcengine.com/docs/6561/1257584) |
 
 ### .env 文件示例
 
@@ -115,7 +135,7 @@ async def entry_point(ctx: JobContext):
 
     session = AgentSession(
         stt=stt,
-        tts=volcengine.TTS(app_id="your_tts_app_id", cluster="your_cluster"),
+        tts=volcengine.TTS(app_id="your_tts_app_id"),
         llm=volcengine.LLM(model="doubao-1-5-pro-32k-250115")
     )
 
@@ -331,8 +351,8 @@ async def entry_point(ctx: JobContext):
         # 语音合成
         tts=volcengine.TTS(
             app_id="your_tts_app_id",
-            cluster="your_cluster",
-            voice_type="BV001_V2_streaming"
+            resource_id="seed-tts-2.0",
+            voice="zh_female_xiaohe_uranus_bigtts"
         ),
         # 单独的LLM (非实时)
         llm=volcengine.LLM(model="doubao-1-5-pro-32k-250115")
@@ -353,13 +373,24 @@ if __name__ == "__main__":
 ```python
 volcengine.TTS(
     app_id: str,           # 应用ID
-    cluster: str,          # 集群ID
-    voice_type: str = "BV001_V2_streaming",  # 语音类型
-    speed_ratio: float = 1.0,   # 语速 (0.5-2.0)
-    volume_ratio: float = 1.0,  # 音量 (0.1-3.0)
-    pitch_ratio: float = 1.0    # 音调 (0.5-2.0)
+    access_token: str | None = None,    # 访问令牌，可用环境变量
+    resource_id: str | None = None,     # 默认 seed-tts-2.0
+    voice: str = "zh_female_xiaohe_uranus_bigtts",
+    speed: float = 1.0,
+    volume: float = 1.0,
+    pitch: float = 1.0,
+    sample_rate: Literal[24000, 16000, 8000] = 16000,
 )
 ```
+
+### TTS 资源 ID 说明
+
+- `seed-tts-2.0`：豆包语音合成模型 2.0
+- `seed-tts-1.0` / `seed-tts-1.0-concurr`：豆包语音合成模型 1.0
+- `seed-icl-2.0`：豆包声音复刻模型 2.0
+- `seed-icl-1.0` / `seed-icl-1.0-concurr`：豆包声音复刻模型 1.0
+
+`seed-tts-*` 只能调用语音合成音色，`seed-icl-*` 只能调用声音复刻音色。`resource_id` 和音色版本必须匹配。
 
 ### STT (语音识别)
 
@@ -525,16 +556,16 @@ A: 根据您的应用需求选择合适的版本：
 
 ## 📝 更新日志
 
-### v1.2.9
-- ✨ **新增实时语音模型**：支持端到端全双工语音交互
-- 🎯 **增强大模型语音识别**：优化BigModelSTT性能和稳定性
-- 🔧 **改进API设计**：RealtimeModel支持丰富的配置选项
-- 🌐 **集成网络搜索**：支持实时网络信息检索和摘要
-- 🧠 **RAG功能支持**：可配置检索增强生成回调函数
-- 🎭 **角色配置系统**：支持自定义AI助手角色和性格
-- 🔊 **多语音类型**：支持多种预训练语音模型
-- 📚 **完善文档**：详细的使用指南和API参考
-- 🐛 **修复已知问题**：提升整体稳定性和兼容性
+### v1.5.4 适配
+- 升级 `livekit-agents` 到 `1.5.4`
+- Python 要求调整为 `>=3.10`
+- `volcengine.TTS` 迁移到豆包语音合成大模型 V3 HTTP Chunked 接口
+- `volcengine.TTS` 移除 `cluster` 参数
+- `volcengine.TTS` 默认资源改为 `seed-tts-2.0`
+- `volcengine.TTS` 默认音色改为 `zh_female_xiaohe_uranus_bigtts`
+- 修复 V3 TTS 流式响应解析，按 JSON chunk 解码 base64 音频
+- 修复无音频返回时静默失败的问题
+- `BigModelSTT` 补齐 `X-Api-Connect-Id` 握手头
 
 ## 🤝 贡献
 
@@ -560,4 +591,3 @@ A: 根据您的应用需求选择合适的版本：
 
 - [LiveKit](https://github.com/livekit/agents) - 优秀的实时通信框架
 - [火山引擎](https://www.volcengine.com/) - 强大的AI服务提供商
-

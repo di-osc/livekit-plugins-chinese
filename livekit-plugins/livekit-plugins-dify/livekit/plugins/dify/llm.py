@@ -12,7 +12,7 @@ from livekit.agents import (
     APIStatusError,
     llm,
 )
-from livekit.agents.llm import FunctionTool, ToolChoice
+from livekit.agents.llm import ToolChoice
 from livekit.agents.types import (
     DEFAULT_API_CONNECT_OPTIONS,
     NOT_GIVEN,
@@ -85,7 +85,7 @@ class LLM(llm.LLM):
         *,
         chat_ctx: llm.ChatContext,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
-        tools: list[FunctionTool] | None = None,
+        tools: list[llm.Tool] | None = None,
         parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
         tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
         extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
@@ -93,7 +93,12 @@ class LLM(llm.LLM):
         """Start a chat completion stream"""
         # Extract the last user message
         last_message = next(
-            (msg for msg in reversed(chat_ctx.items) if msg.role == "user"), None
+            (
+                msg
+                for msg in reversed(chat_ctx.items)
+                if msg.type == "message" and msg.role == "user"
+            ),
+            None,
         )
         if not last_message:
             raise ValueError("No user message found in chat context")
@@ -126,7 +131,7 @@ class LLM(llm.LLM):
             dify_stream=stream,
             chat_ctx=chat_ctx,
             conn_options=conn_options,
-            tools=tools,
+            tools=tools or [],
         )
 
     def ensure_session(self) -> None:
@@ -201,9 +206,11 @@ class LLMStream(llm.LLMStream):
         dify_stream: aiohttp.ClientResponse,
         chat_ctx: llm.ChatContext,
         conn_options: APIConnectOptions,
-        tools: list[FunctionTool] | None = None,
+        tools: list[llm.Tool] | None = None,
     ) -> None:
-        super().__init__(llm, chat_ctx=chat_ctx, conn_options=conn_options, tools=tools)
+        super().__init__(
+            llm, chat_ctx=chat_ctx, conn_options=conn_options, tools=tools or []
+        )
         self._awaitable_dify_stream = dify_stream
         self._dify_stream: aiohttp.ClientResponse | None = None
         self._request_id: str = ""

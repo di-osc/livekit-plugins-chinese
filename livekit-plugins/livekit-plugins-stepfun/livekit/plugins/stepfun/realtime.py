@@ -192,6 +192,7 @@ class RealtimeModel(llm.RealtimeModel):
                 user_transcription=input_audio_transcription is not None,
                 auto_tool_reply_generation=False,
                 audio_output="audio" in modalities,
+                manual_function_calls=True,
             )
         )
 
@@ -914,9 +915,7 @@ class RealtimeSession(
 
         return events
 
-    async def update_tools(
-        self, tools: list[llm.FunctionTool | llm.RawFunctionTool]
-    ) -> None:
+    async def update_tools(self, tools: list[llm.Tool]) -> None:
         async with self._update_fnc_ctx_lock:
             ev = self._create_tools_update_event(tools)
             self.send_event(ev)
@@ -939,9 +938,7 @@ class RealtimeSession(
             ]
             self._tools = llm.ToolContext(retained_tools)
 
-    def _create_tools_update_event(
-        self, tools: list[llm.FunctionTool | llm.RawFunctionTool]
-    ) -> SessionUpdateEvent:
+    def _create_tools_update_event(self, tools: list[llm.Tool]) -> SessionUpdateEvent:
         oai_tools: list[session_update_event.SessionTool] = []
         retained_tools: list[llm.FunctionTool | llm.RawFunctionTool] = []
 
@@ -1025,7 +1022,11 @@ class RealtimeSession(
         self._pushed_duration_s = 0
 
     def generate_reply(
-        self, *, instructions: NotGivenOr[str] = NOT_GIVEN
+        self,
+        *,
+        instructions: NotGivenOr[str] = NOT_GIVEN,
+        tool_choice: NotGivenOr[llm.ToolChoice] = NOT_GIVEN,
+        tools: NotGivenOr[list[llm.Tool]] = NOT_GIVEN,
     ) -> asyncio.Future[llm.GenerationCreatedEvent]:
         event_id = utils.shortuuid("response_create_")
         fut = asyncio.Future[llm.GenerationCreatedEvent]()

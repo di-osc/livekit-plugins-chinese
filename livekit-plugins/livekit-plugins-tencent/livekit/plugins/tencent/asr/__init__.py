@@ -4,10 +4,6 @@ import hmac
 import hashlib
 import base64
 import time
-import random
-import os
-import json
-from ..common import Credential
 
 
 class FlashRecognitionRequest:

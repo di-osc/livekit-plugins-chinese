@@ -3,8 +3,8 @@ from __future__ import annotations
 import base64
 import os
 from collections import OrderedDict
-from collections.abc import Awaitable
-from typing import Any, Callable, Union
+from collections.abc import Awaitable, Sequence
+from typing import Any, Callable, Union, cast
 
 from openai.types.chat import (
     ChatCompletionContentPartParam,
@@ -25,8 +25,11 @@ def get_base_url(base_url: str | None) -> str:
     return base_url
 
 
-def to_fnc_ctx(fnc_ctx: list[llm.FunctionTool]) -> list[ChatCompletionToolParam]:
-    return [llm.utils.build_strict_openai_schema(fnc) for fnc in fnc_ctx]
+def to_fnc_ctx(fnc_ctx: Sequence[llm.Tool]) -> list[ChatCompletionToolParam]:
+    return cast(
+        list[ChatCompletionToolParam],
+        llm.ToolContext(fnc_ctx).parse_function_tools("openai"),
+    )
 
 
 def to_chat_ctx(

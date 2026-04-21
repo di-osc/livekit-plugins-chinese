@@ -86,6 +86,7 @@ class BigModelSTTOptions:
     app_id: str | None = None
     access_token: str | None = None
     source_type: Literal["duration", "concurrent"] = "duration"
+    resource_id: str | None = None
 
     # audio
     base_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
@@ -179,7 +180,9 @@ class BigModelSTTOptions:
         header = {}
         if reqid is None:
             reqid = utils.shortuuid()
-        if self.source_type == "duration":
+        if self.resource_id is not None:
+            header["X-Api-Resource-Id"] = self.resource_id
+        elif self.source_type == "duration":
             header["X-Api-Resource-Id"] = "volc.bigasr.sauc.duration"
         else:
             header["X-Api-Resource-Id"] = "volc.bigasr.sauc.concurrent"
@@ -193,6 +196,7 @@ class BigModelSTTOptions:
                 raise ValueError("VOLCENGINE_STT_ACCESS_TOKEN is not set")
         header["X-Api-Access-Key"] = self.access_token
         header["X-Api-App-Key"] = self.app_id
+        header["X-Api-Connect-Id"] = reqid
         header["X-Api-Request-Id"] = reqid
         return header
 
@@ -204,6 +208,7 @@ class BigModelSTT(stt.STT):
         app_id: str | None = None,
         base_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
         access_token: str | None = None,
+        resource_id: str | None = None,
         model_name: str = "bigmodel",
         enable_itn: bool = False,
         enable_punc: bool = True,
@@ -220,6 +225,7 @@ class BigModelSTT(stt.STT):
                     app_id (str): 应用ID,可以在控制台查看。
                     base_url (str, optional): 地址. Defaults to "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel".
                     access_token (str | None, optional): 使用火山引擎控制台获取的Access Token. Defaults to None.
+                    resource_id (str | None, optional): 资源 ID，例如 1.0 小时版 volc.bigasr.sauc.duration，2.0 小时版 volc.seedasr.sauc.duration。Defaults to None.
                     audio_format (Literal[&quot;raw&quot;, &quot;wav&quot;, &quot;mp3&quot;, &quot;ogg&quot;], optional): 音频容器格式. Defaults to "raw".
                     sample_rate (int, optional): 音频采样率. Defaults to 16000.
                     bits (int, optional): 音频采样点位数. Defaults to 16.
@@ -245,6 +251,7 @@ class BigModelSTT(stt.STT):
             base_url=base_url,
             access_token=access_token,
             app_id=app_id,
+            resource_id=resource_id,
             model_name=model_name,
             enable_itn=enable_itn,
             enable_punc=enable_punc,

@@ -7,7 +7,7 @@ from jsonargparse import auto_cli
 load_dotenv()
 
 
-def run(version: str, publish: bool = False, agent_version: str = "1.2.9"):
+def run(version: str, publish: bool = False, agent_version: str = "1.5.4"):
     dist_dir = Path("dist")
     if not dist_dir.exists():
         dist_dir.mkdir()

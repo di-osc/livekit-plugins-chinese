@@ -13,7 +13,6 @@ from openai.types.chat.chat_completion_chunk import Choice
 from livekit.agents import APIConnectionError, APIStatusError, APITimeoutError, llm
 from livekit.agents.llm import ToolChoice
 from livekit.agents.llm.chat_context import ChatContext
-from livekit.agents.llm.tool_context import FunctionTool
 from livekit.agents.types import (
     DEFAULT_API_CONNECT_OPTIONS,
     NOT_GIVEN,
@@ -95,7 +94,7 @@ class LLM(llm.LLM):
         self,
         *,
         chat_ctx: ChatContext,
-        tools: list[FunctionTool] | None = None,
+        tools: list[llm.Tool] | None = None,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
         parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
         tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
@@ -152,7 +151,7 @@ class LLMStream(llm.LLMStream):
         model: str,
         client: openai.AsyncClient,
         chat_ctx: llm.ChatContext,
-        tools: list[FunctionTool],
+        tools: list[llm.Tool],
         conn_options: APIConnectOptions,
         extra_kwargs: dict[str, Any],
     ) -> None:
@@ -201,7 +200,7 @@ class LLMStream(llm.LLMStream):
 
                     if chunk.usage is not None:
                         retryable = False
-                        chunk = llm.ChatChunk(
+                        usage_chunk = llm.ChatChunk(
                             id=chunk.id,
                             usage=llm.CompletionUsage(
                                 completion_tokens=chunk.usage.completion_tokens,
@@ -209,7 +208,7 @@ class LLMStream(llm.LLMStream):
                                 total_tokens=chunk.usage.total_tokens,
                             ),
                         )
-                        self._event_ch.send_nowait(chunk)
+                        self._event_ch.send_nowait(usage_chunk)
             logger.info("llm end")
 
         except openai.APITimeoutError:
