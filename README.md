@@ -27,3 +27,15 @@
 | 阶跃星辰 | ❎ | ❎  | ❎ | ✅ |[点击这里](livekit-plugins/livekit-plugins-stepfun) |
 | Dify | ❎ | ❎  | ✅  | ❎|[点击这里](livekit-plugins/livekit-plugins-dify) |
 | FlashTTS | ❎ | ✅  | ❎ | ❎ |[点击这里](livekit-plugins/livekit-plugins-flashtts) |
+
+## 创建 GitHub Release
+
+发布前，将五个插件的 `version.py` 更新为同一版本并提交，然后推送对应的 `v<版本号>` 标签：
+
+```bash
+git tag v1.6.7
+git push origin v1.6.7
+```
+
+GitHub Actions 会自动校验版本、构建所有插件的 wheel 和源码包、生成 SHA-256
+校验文件，并创建附带这些构建产物的 GitHub Release。该流程不会发布到 PyPI。

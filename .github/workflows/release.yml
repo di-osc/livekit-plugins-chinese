@@ -1,0 +1,77 @@
+name: Create GitHub Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build packages and create release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8
+        with:
+          version: "0.11.8"
+
+      - name: Validate package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_version="${GITHUB_REF_NAME#v}"
+          if [[ -z "${release_version}" || "${release_version}" == "${GITHUB_REF_NAME}" ]]; then
+            echo "::error::Release tag must use the v<version> format."
+            exit 1
+          fi
+
+          for version_file in livekit-plugins/*/livekit/plugins/*/version.py; do
+            package_version="$(sed -n 's/^__version__ = "\([^"]*\)"/\1/p' "${version_file}")"
+            if [[ "${package_version}" != "${release_version}" ]]; then
+              echo "::error file=${version_file}::Package version ${package_version:-<missing>} does not match tag ${GITHUB_REF_NAME}."
+              exit 1
+            fi
+          done
+
+      - name: Build plugin packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/dist"
+
+          for package_dir in livekit-plugins/*; do
+            if [[ -f "${package_dir}/pyproject.toml" ]]; then
+              (
+                cd "${package_dir}"
+                uv build --out-dir "${GITHUB_WORKSPACE}/dist"
+              )
+            fi
+          done
+
+      - name: Create checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: dist/*
