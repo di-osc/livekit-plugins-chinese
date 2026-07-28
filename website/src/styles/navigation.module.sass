@@ -74,12 +74,23 @@
     pointer-events: none
 
 .github
-    text-transform: initial
-    margin-top: 0.25rem
-    margin-left: 1.5em !important
+    align-items: center
+    border-radius: var(--border-radius)
+    color: var(--color-theme-dark)
+    display: inline-flex
+    flex: 0 0 auto
+    font: 700 1.4rem/1 var(--font-secondary)
+    gap: 0.55rem
+    margin-right: 1.5rem
+    padding: 0.65rem 0.75rem
 
-    & > span
-        min-width: 100px
+    &:hover
+        background: var(--color-theme-light)
+
+    &:focus-visible
+        box-shadow: 0 0 0 3px var(--color-theme-opaque)
+        outline: 2px solid var(--color-theme-dark)
+        outline-offset: 2px
 
 .dropdown
     --dropdown-text-color: var(--color-theme-dark)
@@ -120,6 +131,16 @@
 @include breakpoint(max, xs)
     .title-name
         font-size: 1.35rem
+
+    .github
+        height: 4rem
+        justify-content: center
+        margin-right: 0.5rem
+        padding: 0
+        width: 4rem
+
+    .github-label
+        display: none
 
     .list
         display: none

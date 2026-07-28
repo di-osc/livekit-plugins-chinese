@@ -4,8 +4,11 @@ import classNames from 'classnames'
 
 import Link from './link'
 import Dropdown from './dropdown'
+import Icon from './icon'
 import classes from '../styles/navigation.module.sass'
 import siteMetadata from '../../meta/site.json'
+
+const repositoryUrl = `https://github.com/${siteMetadata.repo}`
 
 const isSectionActive = (url, section) =>
     Boolean(section) && (url === `/${section}` || url.startsWith(`/${section}/`))
@@ -54,6 +57,18 @@ export default function Navigation({ title, items = [], section, children }) {
                     })}
                 </ul>
             </div>
+            <Link
+                to={repositoryUrl}
+                className={classes.github}
+                aria-label="在 GitHub 上查看仓库"
+                title="GitHub 仓库"
+                target="_blank"
+                rel="noopener noreferrer"
+                noLinkLayout
+            >
+                <Icon name="github" width={18} />
+                <span className={classes['github-label']}>GitHub</span>
+            </Link>
             {children}
         </nav>
     )
