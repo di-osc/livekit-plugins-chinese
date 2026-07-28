@@ -1,0 +1,611 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+from types import SimpleNamespace
+
+import aiohttp
+import pytest
+
+from livekit.agents import function_tool, llm
+from livekit.plugins.aliyun import realtime as aliyun_realtime
+from livekit.plugins.aliyun.realtime import (
+    ClonedVoiceId,
+    DEFAULT_MODEL,
+    RealtimeModel,
+    RealtimeSession,
+    _livekit_item_to_qwen_item,
+    _process_base_url,
+    _qwen_item_to_livekit_item,
+)
+
+
+class _FakeWebSocket:
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+        self.incoming: asyncio.Queue[SimpleNamespace] = asyncio.Queue()
+
+    async def send_str(self, data: str) -> None:
+        self.sent.append(data)
+
+    async def receive(self) -> SimpleNamespace:
+        return await self.incoming.get()
+
+    async def close(self) -> None:
+        return None
+
+
+class _FakeHTTPSession:
+    def __init__(self, ws: _FakeWebSocket) -> None:
+        self.ws = ws
+        self.url: str | None = None
+        self.headers: dict[str, str] | None = None
+
+    async def ws_connect(self, *, url: str, headers: dict[str, str]) -> _FakeWebSocket:
+        self.url = url
+        self.headers = headers
+        return self.ws
+
+
+async def _wait_until(predicate: object, *, attempts: int = 20) -> None:
+    """Yield to background WebSocket tasks until a synchronous predicate is true."""
+    assert callable(predicate)
+    for _ in range(attempts):
+        if predicate():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("condition was not reached by the background task")
+
+
+async def _initialize_qwen_session(
+    ws: _FakeWebSocket,
+    session: RealtimeSession,
+) -> None:
+    """Complete Qwen's session.created -> session.update -> session.updated handshake."""
+    await asyncio.sleep(0)
+    await ws.incoming.put(
+        SimpleNamespace(
+            type=aiohttp.WSMsgType.TEXT,
+            data=json.dumps({"type": "session.created", "session": {"id": "sess-1"}}),
+        )
+    )
+    await _wait_until(lambda: len(ws.sent) == 1)
+    await ws.incoming.put(
+        SimpleNamespace(
+            type=aiohttp.WSMsgType.TEXT,
+            data=json.dumps({"type": "session.updated", "session": {"id": "sess-1"}}),
+        )
+    )
+    await _wait_until(session._server_session_updated.is_set)
+
+
+def _sent_event_types(ws: _FakeWebSocket) -> list[str]:
+    """Return protocol event types already written to the fake WebSocket."""
+    return [json.loads(event)["type"] for event in ws.sent]
+
+
+def test_process_base_url_preserves_query_and_sets_model() -> None:
+    assert (
+        _process_base_url(
+            "https://example.aliyuncs.com/api-ws/v1/realtime?workspace=test",
+            "qwen-audio-3.0-realtime-flash",
+        )
+        == "wss://example.aliyuncs.com/api-ws/v1/realtime"
+        "?workspace=test&model=qwen-audio-3.0-realtime-flash"
+    )
+
+
+def test_model_defaults_and_workspace_url() -> None:
+    model = RealtimeModel(api_key="test", workspace_id="ws-id")
+
+    assert model.model == DEFAULT_MODEL
+    assert model.capabilities.audio_output is True
+    assert model.capabilities.mutable_tools is True
+    assert model.capabilities.message_truncation is False
+    assert model.capabilities.per_response_tool_choice is False
+    assert (
+        model._opts.base_url
+        == "wss://ws-id.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime"
+    )
+
+
+def test_model_rejects_audio_only_modality() -> None:
+    with pytest.raises(ValueError, match="modalities"):
+        RealtimeModel(api_key="test", modalities=["audio"])
+
+
+@pytest.mark.parametrize(
+    "voice",
+    [
+        "longanqian",
+        "longanlingxin",
+        "longanlingxi",
+        "longanxiaoxin",
+        "longanlufeng",
+    ],
+)
+def test_model_accepts_every_builtin_voice(voice: str) -> None:
+    model = RealtimeModel(api_key="test", voice=voice)  # type: ignore[arg-type]
+    assert model._opts.voice == voice
+
+
+def test_model_accepts_matching_cloned_voice() -> None:
+    voice = ClonedVoiceId("qwen-audio-3.0-realtime-plus-myvoice-0123456789")
+    model = RealtimeModel(api_key="test", voice=voice)
+    assert model._opts.voice == voice
+
+
+def test_model_rejects_unknown_model() -> None:
+    with pytest.raises(ValueError, match="unsupported Qwen Audio Realtime model"):
+        RealtimeModel(api_key="test", model="qwen-audio-realtime")  # type: ignore[arg-type]
+
+
+def test_model_rejects_cloned_voice_from_another_model() -> None:
+    voice = ClonedVoiceId("qwen-audio-3.0-realtime-flash-myvoice-0123456789")
+    with pytest.raises(ValueError, match="target_model"):
+        RealtimeModel(
+            api_key="test",
+            model="qwen-audio-3.0-realtime-plus",
+            voice=voice,
+        )
+
+
+@pytest.mark.asyncio
+async def test_initial_generation_instruction_becomes_qwen_user_message() -> None:
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    pending = session.generate_reply(instructions="请先向用户问好")
+
+    item = session.chat_ctx.items[-1]
+    assert item.type == "message"
+    assert item.role == "user"
+    assert item.text_content == "请先向用户问好"
+
+    await session.aclose()
+    with pytest.raises(llm.RealtimeError, match="session closed"):
+        await pending
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_later_generation_instruction_remains_system_message() -> None:
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    session._chat_ctx.add_message(role="user", content="真实用户消息")
+    pending = session.generate_reply(instructions="本轮回答必须简短")
+
+    item = session.chat_ctx.items[-1]
+    assert item.type == "message"
+    assert item.role == "system"
+    assert item.text_content == "本轮回答必须简短"
+
+    await session.aclose()
+    with pytest.raises(llm.RealtimeError, match="session closed"):
+        await pending
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_session_waits_for_qwen_initialization_before_sending() -> None:
+    ws = _FakeWebSocket()
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    pending: asyncio.Future[llm.GenerationCreatedEvent] | None = None
+    try:
+        await asyncio.sleep(0)
+        assert ws.sent == []
+
+        await ws.incoming.put(
+            SimpleNamespace(
+                type=aiohttp.WSMsgType.TEXT,
+                data=json.dumps(
+                    {"type": "session.created", "session": {"id": "sess-1"}}
+                ),
+            )
+        )
+        await _wait_until(lambda: len(ws.sent) == 1)
+        assert [json.loads(event)["type"] for event in ws.sent] == ["session.update"]
+
+        await ws.incoming.put(
+            SimpleNamespace(
+                type=aiohttp.WSMsgType.TEXT,
+                data=json.dumps(
+                    {"type": "session.updated", "session": {"id": "sess-1"}}
+                ),
+            )
+        )
+        await _wait_until(session._server_session_updated.is_set)
+
+        pending = session.generate_reply()
+        await _wait_until(lambda: len(ws.sent) == 2)
+        assert [json.loads(event)["type"] for event in ws.sent] == [
+            "session.update",
+            "response.create",
+        ]
+    finally:
+        await session.aclose()
+        if pending is not None:
+            with pytest.raises(llm.RealtimeError, match="session closed"):
+                await pending
+        await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_provider_error_fails_pending_generation_immediately() -> None:
+    ws = _FakeWebSocket()
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    pending = session.generate_reply()
+
+    session._handle_server_event(
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "invalid_value",
+                "message": "invalid session configuration",
+            },
+        }
+    )
+
+    with pytest.raises(llm.RealtimeError, match="invalid session configuration"):
+        await pending
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_smart_turn_marks_invalid_stopped_turns_as_not_transcribed() -> None:
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    stopped_events: list[llm.InputSpeechStoppedEvent] = []
+    session.on("input_speech_stopped", stopped_events.append)
+
+    session._handle_server_event(
+        {
+            "type": "input_audio_buffer.speech_stopped",
+            "item_id": "invalid-user-turn",
+            "reason": "turn_invalid",
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "input_audio_buffer.speech_stopped",
+            "item_id": "valid-user-turn",
+        }
+    )
+    assert [event.user_transcription_enabled for event in stopped_events] == [
+        False,
+        True,
+    ]
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_response_create_waits_for_valid_smart_turn_response_done() -> None:
+    ws = _FakeWebSocket()
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    await _initialize_qwen_session(ws, session)
+
+    session._handle_server_event({"type": "input_audio_buffer.speech_started"})
+    pending = session.generate_reply()
+    await asyncio.sleep(0)
+    assert "response.create" not in _sent_event_types(ws)
+
+    session._handle_server_event(
+        {
+            "type": "input_audio_buffer.speech_stopped",
+            "item_id": "valid-user-turn",
+        }
+    )
+    await asyncio.sleep(0)
+    assert "response.create" not in _sent_event_types(ws)
+
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "automatic-response", "status": "in_progress"},
+        }
+    )
+    assert pending.done() is False
+    session._handle_server_event(
+        {
+            "type": "response.done",
+            "response": {"id": "automatic-response", "status": "completed"},
+        }
+    )
+    await _wait_until(lambda: _sent_event_types(ws).count("response.create") == 1)
+
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "deferred-response", "status": "in_progress"},
+        }
+    )
+    generation = await pending
+    assert generation.response_id == "deferred-response"
+    assert generation.user_initiated is True
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_invalid_smart_turn_releases_queued_response_create() -> None:
+    ws = _FakeWebSocket()
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    await _initialize_qwen_session(ws, session)
+
+    session._handle_server_event({"type": "input_audio_buffer.speech_started"})
+    pending = session.generate_reply()
+    await asyncio.sleep(0)
+    assert "response.create" not in _sent_event_types(ws)
+
+    session._handle_server_event(
+        {
+            "type": "input_audio_buffer.speech_stopped",
+            "item_id": "invalid-user-turn",
+            "reason": "turn_invalid",
+        }
+    )
+    await _wait_until(lambda: _sent_event_types(ws).count("response.create") == 1)
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "response-after-invalid-turn"},
+        }
+    )
+    assert (await pending).response_id == "response-after-invalid-turn"
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_user_speaking_response_create_error_is_requeued() -> None:
+    ws = _FakeWebSocket()
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    await _initialize_qwen_session(ws, session)
+
+    pending = session.generate_reply()
+    await _wait_until(lambda: _sent_event_types(ws).count("response.create") == 1)
+    session._handle_server_event(
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "invalid_value",
+                "message": "Cannot create response while user is speaking.",
+                "param": "response.create",
+            },
+        }
+    )
+    await asyncio.sleep(0)
+    assert pending.done() is False
+
+    session._handle_server_event(
+        {
+            "type": "input_audio_buffer.speech_stopped",
+            "item_id": "valid-user-turn",
+        }
+    )
+    await asyncio.sleep(0)
+    assert _sent_event_types(ws).count("response.create") == 1
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "automatic-user-response"},
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.done",
+            "response": {
+                "id": "automatic-user-response",
+                "status": "completed",
+            },
+        }
+    )
+    await _wait_until(lambda: _sent_event_types(ws).count("response.create") == 2)
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "retried-response"},
+        }
+    )
+    assert (await pending).response_id == "retried-response"
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_response_create_timeout_starts_only_after_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(aliyun_realtime, "_RESPONSE_CREATE_TIMEOUT", 0.01)
+    ws = _FakeWebSocket()
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    await _initialize_qwen_session(ws, session)
+
+    session._handle_server_event({"type": "input_audio_buffer.speech_started"})
+    pending = session.generate_reply()
+    await asyncio.sleep(0.03)
+    assert pending.done() is False
+
+    session._handle_server_event(
+        {
+            "type": "input_audio_buffer.speech_stopped",
+            "item_id": "invalid-user-turn",
+            "reason": "turn_invalid",
+        }
+    )
+    await _wait_until(lambda: _sent_event_types(ws).count("response.create") == 1)
+    with pytest.raises(llm.RealtimeError, match="generate_reply timed out"):
+        await pending
+
+    await session.aclose()
+    await model.aclose()
+
+
+def test_chat_item_conversion_round_trip() -> None:
+    message = llm.ChatMessage(
+        id="item-1",
+        role="user",
+        content=["你好"],
+    )
+
+    qwen_item = _livekit_item_to_qwen_item(message)
+    converted = _qwen_item_to_livekit_item(qwen_item)
+
+    assert qwen_item == {
+        "id": "item-1",
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "你好"}],
+    }
+    assert converted.id == message.id
+    assert converted.type == message.type
+    assert converted.role == message.role
+    assert converted.content == message.content
+
+    assistant = llm.ChatMessage(
+        id="item-2",
+        role="assistant",
+        content=["您好"],
+    )
+    assert _livekit_item_to_qwen_item(assistant)["content"] == [
+        {"type": "output_text", "text": "您好"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_session_maps_qwen_audio_and_function_events() -> None:
+    ws = _FakeWebSocket()
+    http_session = _FakeHTTPSession(ws)
+    model = RealtimeModel(api_key="test", http_session=http_session)  # type: ignore[arg-type]
+    session = model.session()
+    generations: list[llm.GenerationCreatedEvent] = []
+    session.on("generation_created", generations.append)
+
+    await asyncio.sleep(0)
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "response-1", "status": "in_progress"},
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.output_item.added",
+            "item": {"id": "message-1", "type": "message"},
+        }
+    )
+
+    message = await anext(generations[0].message_stream.__aiter__())
+    session._handle_server_event(
+        {
+            "type": "response.audio_transcript.delta",
+            "item_id": "message-1",
+            "delta": "你好",
+        }
+    )
+    pcm = b"\x01\x00\x02\x00"
+    session._handle_server_event(
+        {
+            "type": "response.audio.delta",
+            "item_id": "message-1",
+            "delta": base64.b64encode(pcm).decode(),
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.function_call_arguments.done",
+            "item_id": "call-item-1",
+            "call_id": "call-1",
+            "name": "weather",
+            "arguments": '{"city":"杭州"}',
+        }
+    )
+
+    assert await anext(message.text_stream.__aiter__()) == "你好"
+    audio = await anext(message.audio_stream.__aiter__())
+    assert audio.sample_rate == 24000
+    assert audio.data.tobytes() == pcm
+    function_call = await anext(generations[0].function_stream.__aiter__())
+    assert function_call.call_id == "call-1"
+    assert function_call.name == "weather"
+
+    session._handle_server_event(
+        {
+            "type": "response.done",
+            "response": {
+                "id": "response-1",
+                "status": "completed",
+                "usage": {
+                    "input_tokens": 2,
+                    "output_tokens": 3,
+                    "total_tokens": 5,
+                },
+            },
+        }
+    )
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tools_use_qwen_function_schema() -> None:
+    @function_tool
+    async def weather(city: str) -> str:
+        """查询天气。"""
+        return city
+
+    ws = _FakeWebSocket()
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    await session.update_tools([weather])
+
+    event = session._create_session_update_event()
+    assert event["session"]["tools"][0]["function"]["name"] == "weather"
+
+    await session.aclose()
+    await model.aclose()
