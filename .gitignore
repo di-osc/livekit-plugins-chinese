@@ -186,3 +186,4 @@ uv.lock
 website/node_modules/
 website/out/
 website/.next/
+.cursor
