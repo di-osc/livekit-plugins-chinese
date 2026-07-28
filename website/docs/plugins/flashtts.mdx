@@ -3,18 +3,22 @@ title: FlashTTS
 teaser: 将自托管 FlashTTS 服务作为 LiveKit 流式 TTS
 section: plugins
 menu:
-  - ['适用场景', 'use-case']
+  - ['支持能力', 'capabilities']
   - ['部署与安装', 'setup']
   - ['配置', 'config']
   - ['主要参数', 'parameters']
   - ['排查', 'troubleshooting']
 ---
 
-## 适用场景 {id="use-case"}
+## 支持能力 {id="capabilities"}
 
 FlashTTS 插件适合已经部署 [HuiResearch/FlashTTS](https://github.com/HuiResearch/FlashTTS)
 服务、希望在 LiveKit 中使用开源 TTS 模型的团队。它不是托管 API，因此服务容量、模型
 文件、音色和鉴权均由部署方负责。
+
+- TTS：通过自托管 FlashTTS HTTP 服务进行流式语音合成。
+- 支持服务端音色、语速、音高和采样参数；实际能力取决于服务端模型。
+- 插件不提供 STT、LLM 或 RealtimeModel。
 
 ## 部署与安装 {id="setup"}
 
@@ -22,6 +26,8 @@ FlashTTS 插件适合已经部署 [HuiResearch/FlashTTS](https://github.com/HuiR
 
 ```bash
 pip install livekit-plugins-flashtts
+# 或
+uv add livekit-plugins-flashtts
 ```
 
 ## 配置 {id="config"}

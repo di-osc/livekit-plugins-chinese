@@ -6,7 +6,6 @@
                 "label": "开始使用",
                 "items": [
                     { "text": "项目概览", "url": "/getting-started" },
-                    { "text": "安装插件", "url": "/getting-started/installation" },
                     { "text": "第一个语音 Agent", "url": "/getting-started/first-agent" },
                     { "text": "密钥与环境变量", "url": "/getting-started/credentials" }
                 ]
@@ -19,7 +18,6 @@
             {
                 "label": "插件",
                 "items": [
-                    { "text": "支持矩阵", "url": "/plugins" },
                     { "text": "阿里云", "url": "/plugins/aliyun" },
                     { "text": "火山引擎", "url": "/plugins/volcengine" },
                     { "text": "阶跃星辰", "url": "/plugins/stepfun" },

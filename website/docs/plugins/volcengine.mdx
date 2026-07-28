@@ -3,6 +3,7 @@ title: 火山引擎
 teaser: 接入豆包语音 STT、TTS、方舟 LLM 与端到端实时语音
 section: plugins
 menu:
+  - ['支持能力', 'capabilities']
   - ['安装与开通', 'setup']
   - ['环境变量', 'env']
   - ['STT + LLM + TTS', 'pipeline']
@@ -11,10 +12,19 @@ menu:
   - ['参数速查', 'reference']
 ---
 
+## 支持能力 {id="capabilities"}
+
+- STT：豆包大模型流式语音识别。
+- TTS：豆包语音合成，支持 Seed TTS 1.0、2.0 及对应声音复刻资源。
+- LLM：火山方舟文本模型，默认模型为 `doubao-seed-2-0-lite-260215`。
+- Realtime：豆包端到端实时语音，支持 `O` 和 `SC` 两类模型。
+
 ## 安装与开通 {id="setup"}
 
 ```bash
 pip install livekit-plugins-volcengine
+# 或
+uv add livekit-plugins-volcengine
 ```
 
 在[豆包语音控制台](https://console.volcengine.com/speech/app)创建应用，并分别开通需要

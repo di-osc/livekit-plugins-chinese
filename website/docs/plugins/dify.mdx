@@ -3,6 +3,7 @@ title: Dify
 teaser: 将 Dify Chat App 作为 LiveKit Agent 的 LLM
 section: plugins
 menu:
+  - ['支持能力', 'capabilities']
   - ['安装与 API Key', 'setup']
   - ['基础使用', 'usage']
   - ['搭配语音组件', 'voice']
@@ -10,10 +11,18 @@ menu:
   - ['限制', 'limitations']
 ---
 
+## 支持能力 {id="capabilities"}
+
+- LLM：将 Dify Chat App 作为 LiveKit Agent 的文本模型。
+- 支持 Dify 会话延续、稳定用户标识和应用开场白。
+- 插件不提供 STT、TTS 或 RealtimeModel；语音 Agent 需搭配其他插件。
+
 ## 安装与 API Key {id="setup"}
 
 ```bash
 pip install livekit-plugins-difyai
+# 或
+uv add livekit-plugins-difyai
 ```
 
 在 Dify 应用的“访问 API / API Access”页面创建 Service API Key：

@@ -19,8 +19,8 @@ export default function Home() {
                 </LandingSubtitle>
             </LandingHeader>
             <LandingGrid blocks>
-                <LandingCard title="五个插件，一个入口" url="/plugins" button="查看支持矩阵">
-                    按 STT、TTS、LLM 和 Realtime 能力选择插件，并直接复制可运行配置。
+                <LandingCard title="五个插件，一个入口" url="/plugins" button="查看插件文档">
+                    在每个插件页面查看支持能力、安装方式，并直接复制可运行配置。
                 </LandingCard>
                 <LandingCard
                     title="密钥申请不再迷路"

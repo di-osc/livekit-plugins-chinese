@@ -3,16 +3,25 @@ title: 阶跃星辰
 teaser: 使用 Step Audio Realtime 构建端到端实时语音 Agent
 section: plugins
 menu:
+  - ['支持能力', 'capabilities']
   - ['安装与密钥', 'setup']
   - ['快速接入', 'quickstart']
   - ['主要参数', 'parameters']
   - ['注意事项', 'notes']
 ---
 
+## 支持能力 {id="capabilities"}
+
+- Realtime：Step Audio 端到端实时语音，默认模型为 `stepaudio-2.5-realtime`。
+- 模型直接处理音频输入、文本与音频输出、轮次检测和工具调用。
+- 插件不单独提供 STT、文本 LLM 或 TTS 组件。
+
 ## 安装与密钥 {id="setup"}
 
 ```bash
 pip install livekit-plugins-stepfun
+# 或
+uv add livekit-plugins-stepfun
 ```
 
 在[阶跃星辰接口密钥页面](https://platform.stepfun.com/interface-key)创建 API Key：
@@ -29,7 +38,7 @@ from livekit.plugins import stepfun
 
 session = AgentSession(
     llm=stepfun.RealtimeModel(
-        model="step-1o-audio",
+        model="stepaudio-2.5-realtime",
         voice="ganliannvsheng",
         modalities=["text", "audio"],
         temperature=0.8,
@@ -46,7 +55,7 @@ await session.start(
 
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `model` | `str` | `step-1o-audio` | 实时语音模型 |
+| `model` | `str` | `stepaudio-2.5-realtime` | 实时语音模型 |
 | `voice` | `str` | `ganliannvsheng` | 平台音色 ID |
 | `modalities` | 文本 / 音频列表 | 文本 + 音频 | 输出模态 |
 | `temperature` | `float` | 插件默认值 | 生成随机性 |

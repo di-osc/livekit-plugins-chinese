@@ -3,6 +3,7 @@ title: 阿里云
 teaser: 接入 Paraformer、CosyVoice、Qwen 与 Qwen Audio 3.0 Realtime
 section: plugins
 menu:
+  - ['支持能力', 'capabilities']
   - ['安装与凭证', 'setup']
   - ['STT', 'stt']
   - ['TTS', 'tts']
@@ -15,10 +16,19 @@ menu:
 
 阿里云插件同时提供传统 STT + LLM + TTS 流水线和 Qwen Audio 3.0 端到端实时语音。
 
+## 支持能力 {id="capabilities"}
+
+- STT：Paraformer 实时语音识别，默认模型为 `paraformer-realtime-v2`。
+- TTS：CosyVoice 流式语音合成，默认模型为 `cosyvoice-v2`。
+- LLM：百炼 OpenAI 兼容接口中的 Qwen 文本模型，默认模型为 `qwen-plus`。
+- Realtime：`qwen-audio-3.0-realtime-plus` 和 `qwen-audio-3.0-realtime-flash`。
+
 ## 安装与凭证 {id="setup"}
 
 ```bash
 pip install livekit-plugins-aliyun
+# 或
+uv add livekit-plugins-aliyun
 ```
 
 在[阿里云百炼](https://help.aliyun.com/zh/model-studio/get-api-key)创建业务空间 API Key：

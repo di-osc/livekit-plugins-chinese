@@ -1,64 +1,33 @@
 ---
-title: 插件支持矩阵
-teaser: 当前仓库中可安装插件的能力、包名和凭证要求
+title: 插件文档
+teaser: 选择服务商，查看对应插件的支持能力、安装方式和配置说明
 section: plugins
 menu:
-  - ['能力矩阵', 'matrix']
-  - ['安装包', 'packages']
-  - ['推荐组合', 'recipes']
-  - ['维护范围', 'scope']
+  - ['阿里云', 'aliyun']
+  - ['火山引擎', 'volcengine']
+  - ['阶跃星辰', 'stepfun']
+  - ['Dify', 'dify']
+  - ['FlashTTS', 'flashtts']
 ---
 
-## 能力矩阵 {id="matrix"}
+每个插件页面分别说明支持的模型能力、安装包、凭证和使用方式。
 
-| 插件 | STT | TTS | LLM | Realtime | 主要凭证 |
-| --- | --- | --- | --- | --- | --- |
-| [阿里云](/plugins/aliyun) | Paraformer | CosyVoice | Qwen | Qwen Audio 3.0 | `DASHSCOPE_API_KEY` |
-| [火山引擎](/plugins/volcengine) | 豆包语音 | 豆包语音 | 方舟模型 | 豆包实时语音 | App ID + Token / API Key |
-| [阶跃星辰](/plugins/stepfun) | — | — | — | Step Audio | `STEPFUN_REALTIME_API_KEY` |
-| [Dify](/plugins/dify) | — | — | Chat App | — | `DIFY_API_KEY` |
-| [FlashTTS](/plugins/flashtts) | — | 自托管 TTS | — | — | 服务地址，可选 Token |
+## 阿里云 {id="aliyun"}
 
-## 安装包 {id="packages"}
+[查看阿里云插件文档](/plugins/aliyun)
 
-| Python 导入名 | PyPI 包名 |
-| --- | --- |
-| `livekit.plugins.aliyun` | `livekit-plugins-aliyun` |
-| `livekit.plugins.volcengine` | `livekit-plugins-volcengine` |
-| `livekit.plugins.stepfun` | `livekit-plugins-stepfun` |
-| `livekit.plugins.dify` | `livekit-plugins-difyai` |
-| `livekit.plugins.flashtts` | `livekit-plugins-flashtts` |
+## 火山引擎 {id="volcengine"}
 
-## 推荐组合 {id="recipes"}
+[查看火山引擎插件文档](/plugins/volcengine)
 
-### 端到端语音
+## 阶跃星辰 {id="stepfun"}
 
-只配置一个 Realtime 模型：
+[查看阶跃星辰插件文档](/plugins/stepfun)
 
-```python
-AgentSession(
-    llm=aliyun.RealtimeModel(
-        model="qwen-audio-3.0-realtime-plus",
-        turn_detection={"type": "smart_turn"},
-    )
-)
-```
+## Dify {id="dify"}
 
-### 可替换流水线
+[查看 Dify 插件文档](/plugins/dify)
 
-分别组合 STT、LLM 与 TTS，便于独立更换厂商：
+## FlashTTS {id="flashtts"}
 
-```python
-AgentSession(
-    stt=volcengine.STT(),
-    llm=dify.LLM(user="customer-42"),
-    tts=flashtts.TTS(),
-)
-```
-
-后一种方式更容易控制每个阶段，前一种方式通常有更自然的语气和更低的端到端延迟。
-
-## 维护范围 {id="scope"}
-
-当前仓库只保留上述五个插件目录。Baidu、MiniMax、Tencent、Xunfei 与 Zhipu 已进入
-逐步取消支持阶段，新项目不应再依赖这些插件。迁移建议见[维护与迁移](/guides/maintenance)。
+[查看 FlashTTS 插件文档](/plugins/flashtts)

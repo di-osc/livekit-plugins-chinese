@@ -21,8 +21,7 @@
         {
             "label": "快速入口",
             "items": [
-                { "text": "安装", "url": "/getting-started/installation" },
-                { "text": "插件总览", "url": "/plugins" },
+                { "text": "插件文档", "url": "/plugins" },
                 { "text": "Realtime 指南", "url": "/guides/realtime" }
             ]
         },
