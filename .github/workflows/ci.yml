@@ -1,0 +1,60 @@
+name: Python CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "livekit-plugins/**"
+      - "tests/**"
+      - "scripts/check_livekit_agents_dependency.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "livekit-plugins/**"
+      - "tests/**"
+      - "scripts/check_livekit_agents_dependency.py"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8
+        with:
+          version: "0.11.8"
+          enable-cache: true
+
+      - name: Validate LiveKit dependency declarations
+        run: python scripts/check_livekit_agents_dependency.py
+
+      - name: Validate lockfile
+        run: uv lock --check
+
+      - name: Install workspace
+        run: uv sync --all-packages --no-default-groups --group test
+
+      - name: Validate installed LiveKit version
+        run: uv run --no-sync python scripts/check_livekit_agents_dependency.py --check-installed
+
+      - name: Run tests
+        run: uv run --no-sync pytest -q tests
+
+      - name: Build packages
+        run: uv build --all-packages

@@ -180,7 +180,6 @@ test.py
 
 *.ipynb
 config.yaml
-uv.lock
 
 # Documentation website
 website/node_modules/

@@ -15,10 +15,7 @@ def test_aliyun_tts_synthesize_accepts_livekit_connection_options() -> None:
     signature = inspect.signature(AliyunTTS.synthesize)
 
     assert "conn_options" in signature.parameters
-    assert (
-        signature.parameters["conn_options"].kind
-        is inspect.Parameter.KEYWORD_ONLY
-    )
+    assert signature.parameters["conn_options"].kind is inspect.Parameter.KEYWORD_ONLY
 
     instance = AliyunTTS(api_key="test")
     with pytest.raises(NotImplementedError):

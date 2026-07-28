@@ -3,6 +3,11 @@ name = "livekit-plugins-chinese"
 version = "0.1.0"
 requires-python = ">=3.10"
 
+[tool.uv]
+constraint-dependencies = [
+    "livekit-agents==1.6.7",
+]
+
 [tool.uv.sources]
 livekit-plugins-volcengine = { workspace = true }
 livekit-plugins-xunfei = { workspace = true }
@@ -18,12 +23,15 @@ livekit-plugins-aliyun = { workspace = true}
 members = ["livekit-plugins/*"]
 
 [dependency-groups]
+test = [
+    "pytest",
+    "pytest-asyncio>=0.25.3",
+]
 dev = [
+    { include-group = "test" },
     "python-dotenv>=1.0.1",
     "mypy",
-    "pytest",
     "ruff",
-    "pytest-asyncio>=0.25.3",
     "jiwer>=3.1.0",
     "ipykernel>=6.29.5",
     "livekit-plugins-silero>=1.0.17",
@@ -40,4 +48,3 @@ dev = [
 [[tool.uv.index]]
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple/"
-
