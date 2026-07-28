@@ -1,9 +1,38 @@
 from .llm import LLM
+from .realtime import (
+    ClonedVoiceId,
+    Modalities,
+    RealtimeModel,
+    RealtimeModelName,
+    RealtimeSession,
+    Region,
+    ServerVadOptions,
+    SmartTurnOptions,
+    SystemVoice,
+    TurnDetection,
+    Voice,
+)
 from .stt import STT
 from .tts import TTS
 from .version import __version__
 
-__all__ = ["TTS", "LLM", "STT", "__version__"]
+__all__ = [
+    "TTS",
+    "LLM",
+    "STT",
+    "RealtimeModel",
+    "RealtimeSession",
+    "RealtimeModelName",
+    "SystemVoice",
+    "ClonedVoiceId",
+    "Voice",
+    "Modalities",
+    "Region",
+    "ServerVadOptions",
+    "SmartTurnOptions",
+    "TurnDetection",
+    "__version__",
+]
 
 from livekit.agents import Plugin
 
