@@ -27,25 +27,12 @@
 .title
     display: flex
     align-items: center
-    gap: 0.65rem
     color: var(--color-theme-dark)
     white-space: nowrap
 
 .title-name
-    font: 700 1.7rem/1 var(--font-secondary)
-    letter-spacing: -0.035em
-
-.title-divider
-    width: 1px
-    height: 1.5rem
-    background: var(--color-subtle-dark)
-    opacity: 0.45
-
-.title-product
-    color: var(--color-subtle-dark)
-    font: 700 1rem/1 var(--font-secondary)
-    letter-spacing: 0.13em
-    text-transform: uppercase
+    font: 700 1.55rem/1 var(--font-secondary)
+    letter-spacing: -0.02em
 
 .list
     display: flex
@@ -131,6 +118,9 @@
         display: none
 
 @include breakpoint(max, xs)
+    .title-name
+        font-size: 1.35rem
+
     .list
         display: none
 

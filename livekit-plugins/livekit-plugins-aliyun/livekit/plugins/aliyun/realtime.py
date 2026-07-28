@@ -126,6 +126,7 @@ TurnDetection = ServerVadOptions | SmartTurnOptions | None
 DEFAULT_TURN_DETECTION: SmartTurnOptions = {"type": "smart_turn"}
 
 _DEBUG = int(os.getenv("LK_ALIYUN_REALTIME_DEBUG", "0"))
+_TOKENS_PER_MILLION: int = 1_000_000
 _FATAL_ERROR_CODES = frozenset(
     {
         "invalid_api_key",
@@ -134,6 +135,55 @@ _FATAL_ERROR_CODES = frozenset(
         "account_deactivated",
     }
 )
+
+
+@dataclass(frozen=True)
+class _RealtimeTokenPrices:
+    """Alibaba Cloud list prices in CNY per one million tokens."""
+
+    input_text: float
+    """Input text price in CNY per one million tokens."""
+    input_audio: float
+    """Input audio price in CNY per one million tokens."""
+    output_text: float
+    """Output text price in CNY per one million tokens."""
+    output_audio: float
+    """Output audio price in CNY per one million tokens."""
+
+
+_REALTIME_TOKEN_PRICES: dict[RealtimeModelName, _RealtimeTokenPrices] = {
+    "qwen-audio-3.0-realtime-plus": _RealtimeTokenPrices(
+        input_text=5.0,
+        input_audio=40.0,
+        output_text=40.0,
+        output_audio=150.0,
+    ),
+    "qwen-audio-3.0-realtime-flash": _RealtimeTokenPrices(
+        input_text=3.0,
+        input_audio=30.0,
+        output_text=30.0,
+        output_audio=100.0,
+    ),
+}
+"""Official China-region list prices used only for estimated cost logging."""
+
+
+def _estimate_response_cost_cny(
+    *,
+    model: RealtimeModelName,
+    input_text_tokens: int,
+    input_audio_tokens: int,
+    output_text_tokens: int,
+    output_audio_tokens: int,
+) -> float:
+    """Estimate one response's undiscounted Alibaba Cloud cost in CNY."""
+    prices = _REALTIME_TOKEN_PRICES[model]
+    return (
+        input_text_tokens * prices.input_text
+        + input_audio_tokens * prices.input_audio
+        + output_text_tokens * prices.output_text
+        + output_audio_tokens * prices.output_audio
+    ) / _TOKENS_PER_MILLION
 
 
 def _connection_error(
@@ -543,6 +593,8 @@ class RealtimeSession(
         )
         self._current_generation: _ResponseGeneration | None = None
         self._cancelled_response_ids: set[str] = set()
+        self._estimated_cost_cny: float = 0.0
+        """Accumulated undiscounted list-price estimate for this session."""
         self._pending_generations: dict[
             str, asyncio.Future[llm.GenerationCreatedEvent]
         ] = {}
@@ -1351,6 +1403,11 @@ class RealtimeSession(
             # Qwen may still deliver buffered deltas before its cancelled
             # response.done event; none of them belong to a future response.
             if event_type == "response.done":
+                assert isinstance(response, dict)
+                self._record_response_usage_cost(
+                    response_id=response_id,
+                    usage=response.get("usage") or {},
+                )
                 self._cancelled_response_ids.discard(response_id)
             return
 
@@ -1634,8 +1691,15 @@ class RealtimeSession(
         created = generation.created_timestamp
         duration = max(time.time() - created, 1e-9)
         usage = response.get("usage") or {}
-        input_details = usage.get("input_token_details") or {}
-        output_details = usage.get("output_token_details") or {}
+        (
+            input_text_tokens,
+            input_audio_tokens,
+            output_text_tokens,
+            output_audio_tokens,
+        ) = self._record_response_usage_cost(
+            response_id=response.get("id") or generation.response_id,
+            usage=usage,
+        )
 
         for item_id, message in generation.messages.items():
             item = self._chat_ctx.get_by_id(item_id)
@@ -1670,13 +1734,13 @@ class RealtimeSession(
                 total_tokens=usage.get("total_tokens", 0),
                 tokens_per_second=usage.get("output_tokens", 0) / duration,
                 input_token_details=RealtimeModelMetrics.InputTokenDetails(
-                    text_tokens=input_details.get("text_tokens", 0),
-                    audio_tokens=input_details.get("audio_tokens", 0),
+                    text_tokens=input_text_tokens,
+                    audio_tokens=input_audio_tokens,
                     image_tokens=0,
                 ),
                 output_token_details=RealtimeModelMetrics.OutputTokenDetails(
-                    text_tokens=output_details.get("text_tokens", 0),
-                    audio_tokens=output_details.get("audio_tokens", 0),
+                    text_tokens=output_text_tokens,
+                    audio_tokens=output_audio_tokens,
                     image_tokens=0,
                 ),
                 metadata=Metadata(
@@ -1695,6 +1759,72 @@ class RealtimeSession(
                 ),
                 recoverable=True,
             )
+
+    def _record_response_usage_cost(
+        self,
+        *,
+        response_id: str,
+        usage: dict[str, Any],
+    ) -> tuple[int, int, int, int]:
+        """Accumulate and log the list-price estimate for one Qwen response.
+
+        Args:
+            response_id: Provider response identifier used for log correlation.
+            usage: Qwen ``response.done.response.usage`` object.
+
+        Returns:
+            A tuple containing input text, input audio, output text, and output
+            audio token counts in that order.
+
+        Notes:
+            The estimate uses Alibaba Cloud's China-region public list prices.
+            It deliberately excludes free quota, promotions, negotiated
+            discounts, taxes, and non-model infrastructure charges.
+        """
+        # Qwen's current protocol uses the plural ``*_tokens_details`` names.
+        # Keep the singular aliases as fallbacks for compatibility with older
+        # OpenAI-compatible payloads and recorded events.
+        input_details = (
+            usage.get("input_tokens_details") or usage.get("input_token_details") or {}
+        )
+        output_details = (
+            usage.get("output_tokens_details")
+            or usage.get("output_token_details")
+            or {}
+        )
+        input_text_tokens = int(input_details.get("text_tokens", 0) or 0)
+        input_audio_tokens = int(input_details.get("audio_tokens", 0) or 0)
+        output_text_tokens = int(output_details.get("text_tokens", 0) or 0)
+        output_audio_tokens = int(output_details.get("audio_tokens", 0) or 0)
+        if usage:
+            response_cost_cny = _estimate_response_cost_cny(
+                model=self._opts.model,
+                input_text_tokens=input_text_tokens,
+                input_audio_tokens=input_audio_tokens,
+                output_text_tokens=output_text_tokens,
+                output_audio_tokens=output_audio_tokens,
+            )
+            self._estimated_cost_cny += response_cost_cny
+            logger.info(
+                "Qwen Audio Realtime usage cost",
+                extra={
+                    "response_id": response_id,
+                    "model": self._opts.model,
+                    "input_text_tokens": input_text_tokens,
+                    "input_audio_tokens": input_audio_tokens,
+                    "output_text_tokens": output_text_tokens,
+                    "output_audio_tokens": output_audio_tokens,
+                    "estimated_response_cost_cny": round(response_cost_cny, 6),
+                    "estimated_session_cost_cny": round(self._estimated_cost_cny, 6),
+                    "pricing_basis": "Alibaba Cloud China list price; discounts and free quota excluded",
+                },
+            )
+        return (
+            input_text_tokens,
+            input_audio_tokens,
+            output_text_tokens,
+            output_audio_tokens,
+        )
 
     def _handle_error(self, event: dict[str, Any]) -> None:
         error = event.get("error") or {}

@@ -17,6 +17,7 @@ from livekit.plugins.aliyun.realtime import (
     DEFAULT_MODEL,
     RealtimeModel,
     RealtimeSession,
+    _estimate_response_cost_cny,
     _livekit_item_to_qwen_item,
     _process_base_url,
     _qwen_item_to_livekit_item,
@@ -151,6 +152,26 @@ def test_model_rejects_cloned_voice_from_another_model() -> None:
             model="qwen-audio-3.0-realtime-plus",
             voice=voice,
         )
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_cost_cny"),
+    [
+        ("qwen-audio-3.0-realtime-plus", 0.09925),
+        ("qwen-audio-3.0-realtime-flash", 0.069),
+    ],
+)
+def test_estimate_response_cost_uses_model_specific_token_prices(
+    model: str,
+    expected_cost_cny: float,
+) -> None:
+    assert _estimate_response_cost_cny(
+        model=model,  # type: ignore[arg-type]
+        input_text_tokens=1_000,
+        input_audio_tokens=750,
+        output_text_tokens=200,
+        output_audio_tokens=375,
+    ) == pytest.approx(expected_cost_cny)
 
 
 @pytest.mark.asyncio
@@ -420,6 +441,16 @@ async def test_speech_started_closes_active_response_and_ignores_late_events() -
             "response": {
                 "id": "interrupted-response",
                 "status": "cancelled",
+                "usage": {
+                    "input_tokens_details": {
+                        "text_tokens": 0,
+                        "audio_tokens": 10,
+                    },
+                    "output_tokens_details": {
+                        "text_tokens": 0,
+                        "audio_tokens": 10,
+                    },
+                },
                 "status_details": {
                     "type": "cancelled",
                     "reason": "turn_detected",
@@ -430,6 +461,7 @@ async def test_speech_started_closes_active_response_and_ignores_late_events() -
     assert session._current_generation is not None
     assert session._current_generation.response_id == "next-response"
     assert "interrupted-response" not in session._cancelled_response_ids
+    assert session._estimated_cost_cny == pytest.approx(0.0019)
 
     await session.aclose()
     await model.aclose()
@@ -720,6 +752,69 @@ async def test_session_maps_qwen_audio_and_function_events() -> None:
             },
         }
     )
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_response_done_logs_response_and_session_cost(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+
+    with caplog.at_level(logging.INFO, logger="livekit.plugins.aliyun"):
+        for response_id in ("cost-response-1", "cost-response-2"):
+            session._handle_server_event(
+                {
+                    "type": "response.created",
+                    "response": {"id": response_id, "status": "in_progress"},
+                }
+            )
+            session._handle_server_event(
+                {
+                    "type": "response.done",
+                    "response": {
+                        "id": response_id,
+                        "status": "completed",
+                        "usage": {
+                            "input_tokens": 850,
+                            "output_tokens": 425,
+                            "total_tokens": 1_275,
+                            "input_tokens_details": {
+                                "text_tokens": 100,
+                                "audio_tokens": 750,
+                            },
+                            "output_tokens_details": {
+                                "text_tokens": 50,
+                                "audio_tokens": 375,
+                            },
+                        },
+                    },
+                }
+            )
+
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Qwen Audio Realtime usage cost"
+    ]
+    assert len(records) == 2
+    assert records[0].estimated_response_cost_cny == pytest.approx(  # type: ignore[attr-defined]
+        0.08875
+    )
+    assert records[0].estimated_session_cost_cny == pytest.approx(  # type: ignore[attr-defined]
+        0.08875
+    )
+    assert records[1].estimated_session_cost_cny == pytest.approx(  # type: ignore[attr-defined]
+        0.1775
+    )
+    assert records[1].input_audio_tokens == 750  # type: ignore[attr-defined]
+    assert records[1].output_audio_tokens == 375  # type: ignore[attr-defined]
+
     await session.aclose()
     await model.aclose()
 

@@ -31,9 +31,7 @@ export default function Navigation({ title, items = [], section, children }) {
         <nav className={classes.root}>
             <Link to="/" aria-label={title} noLinkLayout>
                 <span className={classes.title}>
-                    <span className={classes['title-name']}>{siteMetadata.company}</span>
-                    <span className={classes['title-divider']} aria-hidden="true" />
-                    <span className={classes['title-product']}>docs</span>
+                    <span className={classes['title-name']}>{siteMetadata.brand}</span>
                 </span>
             </Link>
             <div className={classes.menu}>

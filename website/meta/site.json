@@ -1,5 +1,6 @@
 {
     "title": "LiveKit 中文插件",
+    "brand": "livekit-plugins-chinese",
     "description": "面向国内云服务与开源模型的 LiveKit Agents 插件使用文档。",
     "slogan": "让 LiveKit Agents 更容易接入中文语音与模型服务",
     "company": "DI Open Source Community",
