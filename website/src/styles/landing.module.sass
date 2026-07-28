@@ -1,5 +1,244 @@
 @import base
 
+.capability-home
+    position: relative
+    isolation: isolate
+    min-height: calc(100vh - var(--height-nav))
+    padding: calc(var(--height-nav) + 6.5rem) clamp(2rem, 6vw, 9rem) 8rem
+    overflow: hidden
+    color: #edfaff
+    background-color: var(--color-theme)
+    background-image: var(--landing-overlay), var(--landing-pattern)
+    background-position: center -111px, center 27px
+    background-repeat: no-repeat, repeat
+    background-size: 1444px 573px, 799px 643px
+
+.capability-heading
+    width: min(1180px, 100%)
+    margin: 0 auto 3.5rem
+
+    h1
+        margin: 1.2rem 0 1rem
+        font: 600 clamp(4rem, 6vw, 7.4rem)/0.98 var(--font-secondary)
+        letter-spacing: -0.055em
+        background: linear-gradient(110deg, #fff 5%, #9eeeff 48%, #b6a9ff 90%)
+        -webkit-background-clip: text
+        background-clip: text
+        color: transparent
+
+    p
+        max-width: 68rem
+        margin: 0
+        color: rgba(219, 243, 250, 0.68)
+        font: 500 1.65rem/1.6 var(--font-primary)
+
+.capability-kicker
+    display: flex
+    align-items: center
+    gap: 0.9rem
+    color: #72e5ff
+    font: 600 1.05rem/1 var(--font-code)
+    letter-spacing: 0.18em
+
+    span
+        width: 0.75rem
+        height: 0.75rem
+        border-radius: 50%
+        background: #60e8ff
+        box-shadow: 0 0 0 0.45rem rgba(96, 232, 255, 0.1), 0 0 1.5rem #46dbff
+
+.matrix-shell
+    width: min(1180px, 100%)
+    margin: 0 auto
+    overflow: hidden
+    border: 1px solid rgba(126, 221, 255, 0.16)
+    border-radius: 1.8rem
+    background: linear-gradient(145deg, rgba(8, 38, 54, 0.8), rgba(4, 25, 38, 0.86))
+    box-shadow: 0 2.5rem 7rem rgba(0, 0, 0, 0.38), inset 0 1px rgba(255, 255, 255, 0.05)
+    backdrop-filter: blur(24px)
+
+.matrix-scroll
+    overflow-x: auto
+    scrollbar-color: rgba(88, 218, 255, 0.45) rgba(255, 255, 255, 0.04)
+
+    &:focus-visible
+        box-shadow: inset 0 0 0 2px #62dcff
+
+.matrix
+    min-width: 900px
+    padding: 1rem
+
+.matrix-row
+    display: grid
+    grid-template-columns: minmax(190px, 1.35fr) repeat(4, minmax(145px, 1fr))
+    align-items: stretch
+    border-radius: 1.1rem
+    transition: background 180ms ease, transform 180ms ease
+
+    &:not(.matrix-header)
+        animation: matrix-row-in 450ms ease both
+        animation-delay: calc(var(--row-index) * 60ms)
+
+        &:hover
+            transform: translateX(0.4rem)
+            background: rgba(255, 255, 255, 0.045)
+
+    & > *
+        display: flex
+        align-items: center
+        min-height: 6.7rem
+        padding: 1.3rem 1.4rem
+        border-bottom: 1px solid rgba(160, 222, 240, 0.08)
+
+    &:last-child > *
+        border-bottom: 0
+
+.matrix-header
+    color: rgba(192, 228, 239, 0.45)
+    font: 600 1rem/1 var(--font-code)
+    letter-spacing: 0.14em
+    background: rgba(0, 0, 0, 0.14)
+
+    & > *
+        min-height: 4.2rem
+        border-bottom: 0
+
+.plugin-cell
+    gap: 1.25rem
+
+.plugin-index
+    color: rgba(194, 226, 237, 0.28)
+    font: 500 1rem/1 var(--font-code)
+
+.plugin-link
+    display: inline-flex
+    align-items: center
+    gap: 0.8rem
+    color: #f5fcff
+    font: 600 1.8rem/1.2 var(--font-secondary)
+    text-decoration: none
+
+    span
+        color: var(--row-accent)
+        font-size: 1.3rem
+        transition: transform 160ms ease
+
+    &:hover
+        color: var(--row-accent)
+
+        span
+            transform: translate(0.2rem, -0.2rem)
+
+.capability-cell
+    justify-content: flex-start
+
+.capability-pill
+    display: inline-flex
+    align-items: center
+    gap: 0.75rem
+    min-height: 3.4rem
+    padding: 0.75rem 1rem
+    border: 1px solid color-mix(in srgb, var(--row-accent) 24%, transparent)
+    border-radius: 999px
+    color: #dff8ff
+    background: color-mix(in srgb, var(--row-accent) 9%, transparent)
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.04)
+    font: 500 1.2rem/1.25 var(--font-primary)
+    white-space: nowrap
+
+    i
+        width: 0.65rem
+        height: 0.65rem
+        border-radius: 50%
+        background: var(--row-accent)
+        box-shadow: 0 0 1rem var(--row-accent)
+
+.capability-empty
+    color: rgba(186, 220, 232, 0.2)
+    font: 500 1.7rem/1 var(--font-code)
+
+.accent-cyan
+    --row-accent: #4de0ff
+
+.accent-violet
+    --row-accent: #a894ff
+
+.accent-blue
+    --row-accent: #69a7ff
+
+.accent-green
+    --row-accent: #55e5ad
+
+.accent-orange
+    --row-accent: #ffb36b
+
+.matrix-footer
+    display: flex
+    justify-content: space-between
+    gap: 2rem
+    padding: 1.6rem 2.3rem
+    border-top: 1px solid rgba(160, 222, 240, 0.1)
+    color: rgba(192, 228, 239, 0.5)
+    background: rgba(0, 0, 0, 0.12)
+    font: 500 1.1rem/1.4 var(--font-primary)
+
+    span:first-child
+        display: inline-flex
+        align-items: center
+        gap: 0.7rem
+
+    i
+        width: 0.65rem
+        height: 0.65rem
+        border-radius: 50%
+        background: #55e5ad
+        box-shadow: 0 0 1rem rgba(85, 229, 173, 0.8)
+
+.sr-only
+    position: absolute
+    width: 1px
+    height: 1px
+    padding: 0
+    margin: -1px
+    overflow: hidden
+    clip: rect(0, 0, 0, 0)
+    white-space: nowrap
+
+@keyframes matrix-row-in
+    from
+        opacity: 0
+        transform: translateY(0.8rem)
+    to
+        opacity: 1
+        transform: translateY(0)
+
+@media (prefers-reduced-motion: reduce)
+    .matrix-row
+        animation: none !important
+        transition: none
+
+@include breakpoint(max, sm)
+    .capability-home
+        padding: calc(var(--height-nav) + 4rem) 1.5rem 5rem
+
+    .capability-heading
+        margin-bottom: 2.5rem
+
+        h1
+            font-size: 4.2rem
+
+        p
+            font-size: 1.45rem
+
+    .matrix-shell
+        border-radius: 1.4rem
+
+    .matrix-footer
+        align-items: flex-start
+        flex-direction: column
+        gap: 0.7rem
+        padding: 1.4rem 1.8rem
+
 .header
     background: var(--color-theme)
     padding-top: var(--height-nav)
