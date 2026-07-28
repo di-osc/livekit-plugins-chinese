@@ -1,0 +1,85 @@
+---
+title: FlashTTS
+teaser: 将自托管 FlashTTS 服务作为 LiveKit 流式 TTS
+section: plugins
+menu:
+  - ['适用场景', 'use-case']
+  - ['部署与安装', 'setup']
+  - ['配置', 'config']
+  - ['主要参数', 'parameters']
+  - ['排查', 'troubleshooting']
+---
+
+## 适用场景 {id="use-case"}
+
+FlashTTS 插件适合已经部署 [HuiResearch/FlashTTS](https://github.com/HuiResearch/FlashTTS)
+服务、希望在 LiveKit 中使用开源 TTS 模型的团队。它不是托管 API，因此服务容量、模型
+文件、音色和鉴权均由部署方负责。
+
+## 部署与安装 {id="setup"}
+
+先按 FlashTTS 项目说明启动 API 服务，再安装 LiveKit 插件：
+
+```bash
+pip install livekit-plugins-flashtts
+```
+
+## 配置 {id="config"}
+
+```bash
+FLASHTTS_BASE_URL=http://127.0.0.1:8000
+FLASHTTS_API_KEY=optional-bearer-token
+```
+
+```python
+from livekit.plugins import flashtts
+
+tts = flashtts.TTS(
+    voice="female",
+    sample_rate=16000,
+)
+```
+
+也可以显式传参：
+
+```python
+tts = flashtts.TTS(
+    base_url="https://tts.internal.example",
+    api_key="your-token",
+    voice="female",
+    pitch="moderate",
+    speed="moderate",
+    temperature=0.9,
+)
+```
+
+<Infobox title="配置名称" variant="warning">
+
+源码参数是 `base_url`，环境变量是 `FLASHTTS_BASE_URL`。旧示例中的 `api_url` 和
+`FLASHTTS_API_URL` 不会被当前插件读取。
+
+</Infobox>
+
+## 主要参数 {id="parameters"}
+
+| 参数 | 类型 / 可选值 | 默认值 |
+| --- | --- | --- |
+| `base_url` | URL | `FLASHTTS_BASE_URL` 或 `http://localhost:8000` |
+| `api_key` | 字符串或 `None` | `FLASHTTS_API_KEY` |
+| `sample_rate` | 整数 | `16000` |
+| `voice` | 服务端音色名 | `female` |
+| `pitch` | `very_low` / `low` / `moderate` / `high` / `very_high` | `None` |
+| `speed` | 同上 | `None` |
+| `temperature` | 浮点数 | `0.9` |
+| `top_k` | 整数 | `50` |
+| `top_p` | 浮点数 | `0.95` |
+| `repetition_penalty` | 浮点数 | `1.0` |
+
+`voice` 的实际可选值由服务端加载的模型与配置决定，插件本身不维护统一音色列表。
+
+## 排查 {id="troubleshooting"}
+
+- 连接被拒绝：先从 Agent 主机访问 `FLASHTTS_BASE_URL`，确认容器端口已暴露。
+- 401：确认服务是否真的启用了 Bearer Token，以及 `FLASHTTS_API_KEY` 是否一致。
+- 播放速度或音高无变化：当前模型可能不支持对应控制字段。
+- 音频速度异常：确保插件 `sample_rate` 与服务端返回音频的真实采样率一致。

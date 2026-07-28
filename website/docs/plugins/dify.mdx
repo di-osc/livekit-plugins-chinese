@@ -1,0 +1,84 @@
+---
+title: Dify
+teaser: 将 Dify Chat App 作为 LiveKit Agent 的 LLM
+section: plugins
+menu:
+  - ['安装与 API Key', 'setup']
+  - ['基础使用', 'usage']
+  - ['搭配语音组件', 'voice']
+  - ['会话与用户', 'conversation']
+  - ['限制', 'limitations']
+---
+
+## 安装与 API Key {id="setup"}
+
+```bash
+pip install livekit-plugins-difyai
+```
+
+在 Dify 应用的“访问 API / API Access”页面创建 Service API Key：
+
+```bash
+DIFY_API_KEY=app-your-key
+DIFY_API_BASE=https://api.dify.ai/v1
+DIFY_USER=livekit-user
+```
+
+自托管 Dify 通常把 `DIFY_API_BASE` 设置为 `https://your-domain/v1`。
+
+## 基础使用 {id="usage"}
+
+```python
+from livekit.agents import AgentSession
+from livekit.plugins import dify
+
+dify_llm = dify.LLM(
+    user="customer-42",
+)
+
+session = AgentSession(llm=dify_llm)
+```
+
+构造参数：
+
+| 参数 | 来源 / 默认值 | 说明 |
+| --- | --- | --- |
+| `api_key` | `DIFY_API_KEY` | 应用 Service API Key |
+| `api_base` | `DIFY_API_BASE` 或 `https://api.dify.ai/v1` | API 根地址 |
+| `user` | `DIFY_USER` 或 `test_user` | 终端用户稳定标识 |
+
+## 搭配语音组件 {id="voice"}
+
+Dify 只提供 LLM，完整语音 Agent 仍需 STT 与 TTS：
+
+```python
+from livekit.plugins import dify, volcengine
+
+session = AgentSession(
+    stt=volcengine.STT(),
+    llm=dify.LLM(user="customer-42"),
+    tts=volcengine.TTS(app_id="your-tts-app-id"),
+)
+```
+
+## 会话与用户 {id="conversation"}
+
+插件会把最新用户消息发送到 Dify Chat API，并维护 Dify 返回的会话 ID。`user` 应满足：
+
+- 同一终端用户跨轮次保持稳定。
+- 不包含手机号、邮箱或其他直接身份信息。
+- 不同租户或用户之间不能复用同一个 ID，否则会话历史可能串线。
+
+如 Dify 应用配置了开场白，可以调用：
+
+```python
+opening = await dify_llm.get_opening_words()
+if opening:
+    await session.say(opening)
+```
+
+## 限制 {id="limitations"}
+
+- 当前适配器面向 Dify Chat App，不是 Dify Workflow 的通用执行器。
+- LiveKit 工具不会自动转换成 Dify 工具；工具应在 Dify 应用内配置，或由 Agent 层执行。
+- API Key 必须放在服务端。Dify 官方同样建议不要在浏览器或客户端保存 Service API Key。

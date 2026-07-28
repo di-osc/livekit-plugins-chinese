@@ -1,0 +1,194 @@
+---
+title: 阿里云
+teaser: 接入 Paraformer、CosyVoice、Qwen 与 Qwen Audio 3.0 Realtime
+section: plugins
+menu:
+  - ['安装与凭证', 'setup']
+  - ['STT', 'stt']
+  - ['TTS', 'tts']
+  - ['LLM', 'llm']
+  - ['Realtime', 'realtime']
+  - ['模型与音色', 'voices']
+  - ['自定义音色', 'cloned-voice']
+  - ['常见问题', 'faq']
+---
+
+阿里云插件同时提供传统 STT + LLM + TTS 流水线和 Qwen Audio 3.0 端到端实时语音。
+
+## 安装与凭证 {id="setup"}
+
+```bash
+pip install livekit-plugins-aliyun
+```
+
+在[阿里云百炼](https://help.aliyun.com/zh/model-studio/get-api-key)创建业务空间 API Key：
+
+```bash
+DASHSCOPE_API_KEY=sk-ws-your-key
+```
+
+## STT {id="stt"}
+
+```python
+from livekit.plugins import aliyun
+
+stt = aliyun.STT(
+    model="paraformer-realtime-v2",
+    language="zh",
+    interim_results=True,
+    max_sentence_silence=500,
+    vocabulary_id=None,
+)
+```
+
+`vocabulary_id` 是百炼热词表 ID。`max_sentence_silence` 控制句尾静音毫秒数；越小
+结束越快，但更容易把一句话切成多段。
+
+## TTS {id="tts"}
+
+```python
+tts = aliyun.TTS(
+    model="cosyvoice-v2",
+    voice="longcheng",
+    sample_rate=24000,
+    speech_rate=1,
+    volume=100,
+    rate=1.0,
+    pitch=1.0,
+)
+```
+
+`voice` 使用所选 CosyVoice 模型支持的音色 ID。模型与音色列表以
+[百炼语音合成模型页面](https://bailian.console.aliyun.com/model-market?capabilities=%5B%22TTS%22%5D)
+为准。
+
+## LLM {id="llm"}
+
+```python
+llm = aliyun.LLM(
+    model="qwen-plus",
+    temperature=0.7,
+)
+```
+
+这个适配器使用百炼 OpenAI 兼容端点，支持 LiveKit 工具调用。`model` 可替换为业务
+空间已经开通的 Qwen 模型 ID。
+
+## Realtime {id="realtime"}
+
+```python
+from livekit.agents import Agent, AgentSession
+from livekit.plugins import aliyun
+
+session = AgentSession(
+    llm=aliyun.RealtimeModel(
+        model="qwen-audio-3.0-realtime-plus",
+        voice="longanqian",
+        workspace_id="your-workspace-id",
+        region="cn-beijing",
+        modalities=["text", "audio"],
+        turn_detection={"type": "smart_turn"},
+        max_history_turns=50,
+    )
+)
+
+await session.start(
+    agent=Agent(instructions="你是一个简洁、友好的中文语音助手。"),
+    room=ctx.room,
+)
+```
+
+`workspace_id` 会生成业务空间专属地址：
+
+```text
+wss://{workspace_id}.{region}.maas.aliyuncs.com/api-ws/v1/realtime
+```
+
+也可以用 `base_url` 显式传入完整 WebSocket 端点。插件会把 LiveKit 音频重采样为
+16 kHz PCM16，模型输出为 24 kHz PCM16。
+
+| 参数 | 类型 / 可选值 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `model` | `plus` / `flash` 对应的完整模型 ID | `qwen-audio-3.0-realtime-plus` | Realtime 模型 |
+| `voice` | 内置音色或 `ClonedVoiceId` | `longanqian` | 首次 session update 后不可改 |
+| `modalities` | `["text"]` / `["text","audio"]` | 文本 + 音频 | 输出模态 |
+| `turn_detection` | `SmartTurnOptions` / `ServerVadOptions` / `None` | smart turn | 轮次检测 |
+| `workspace_id` | `str \| None` | `None` | 百炼业务空间 ID |
+| `region` | `cn-beijing` / `ap-southeast-1` | `cn-beijing` | 业务空间地域 |
+| `max_history_turns` | `1..50` | `50` | 请求中保留的问答轮数 |
+
+轮次检测示例：
+
+```python
+# 语义轮次检测：用户停顿但语义未结束时继续等待
+turn_detection = aliyun.SmartTurnOptions(type="smart_turn")
+
+# 声学 VAD
+turn_detection = aliyun.ServerVadOptions(
+    type="server_vad",
+    threshold=0.5,
+    silence_duration_ms=500,
+)
+
+# 手动提交音频
+turn_detection = None
+```
+
+## 模型与音色 {id="voices"}
+
+模型：
+
+- `qwen-audio-3.0-realtime-plus`
+- `qwen-audio-3.0-realtime-flash`
+
+内置音色：
+
+- `longanqian`
+- `longanlingxin`
+- `longanlingxi`
+- `longanxiaoxin`
+- `longanlufeng`
+
+这些选项已经写入 Python 类型提示，IDE 可以直接补全。官方能力与事件协议见
+[Qwen Audio Realtime 文档](https://help.aliyun.com/zh/model-studio/qwen-audio-realtime-user-guides)。
+
+## 自定义音色 {id="cloned-voice"}
+
+声音复刻在百炼侧完成，不是在 LiveKit 插件中上传音频。调用百炼
+[声音复刻服务](https://help.aliyun.com/zh/model-studio/voice-cloning-user-guide)时：
+
+1. 使用 `voice-enrollment`。
+2. `target_model` 必须设为将要使用的 Realtime 模型。
+3. 提交清晰的单人语音样本。
+4. 保存返回的 `voice_id`。
+
+```python
+realtime = aliyun.RealtimeModel(
+    model="qwen-audio-3.0-realtime-plus",
+    voice=aliyun.ClonedVoiceId(
+        "qwen-audio-3.0-realtime-plus-myvoice-0123456789"
+    ),
+    workspace_id="your-workspace-id",
+)
+```
+
+为 `plus` 创建的音色不能用于 `flash`，插件会在连接前检查模型绑定。
+
+## 常见问题 {id="faq"}
+
+### 开场 `generate_reply` 为什么需要用户消息？
+
+Qwen 的 Realtime 协议要求创建响应前对话中已有用户消息。插件会在首次开场且尚无
+真实用户消息时，把 `generate_reply(instructions="...")` 转换为合成的用户触发消息；
+后续 `instructions` 仍作为本轮附加指令。
+
+### 为什么出现“不支持 forcing tool_choice”？
+
+Qwen Audio Realtime 由模型自动选择工具，不支持 LiveKit 强制指定某个工具。插件会
+保留参数兼容性并记录警告，但不会把强制选择发送给 Qwen。
+
+### 为什么工具完成后暂时没有语音结果？
+
+用户仍处于 `speech_started` 到有效 `speech_stopped` 之间时，Qwen 拒绝
+`response.create`。插件会等待服务端确认用户轮次结束，再重试工具结果响应，避免在
+用户说话中途抢答。

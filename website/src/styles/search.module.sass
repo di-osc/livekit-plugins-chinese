@@ -1,0 +1,214 @@
+@import base
+
+.trigger
+    align-items: center
+    background: var(--color-subtle-light)
+    border: 1px solid var(--color-subtle)
+    border-radius: 2rem
+    color: var(--color-theme-dark)
+    cursor: pointer
+    display: inline-flex
+    font: 600 var(--font-size-sm)/1 var(--font-primary)
+    gap: 0.7rem
+    height: 3.6rem
+    padding: 0 0.7rem 0 var(--spacing-xs)
+    white-space: nowrap
+
+    &:hover
+        background: var(--color-theme-light)
+
+    &:focus-visible
+        box-shadow: 0 0 0 3px var(--color-theme-opaque)
+        outline: 2px solid var(--color-theme-dark)
+        outline-offset: 2px
+
+.trigger-label
+    color: var(--color-dark)
+
+.shortcut
+    background: var(--color-back)
+    border: 1px solid var(--color-subtle)
+    border-radius: 4px
+    color: var(--color-subtle-dark)
+    font: 500 1.1rem/1 var(--font-code)
+    padding: 0.45rem 0.55rem
+
+.backdrop
+    align-items: flex-start
+    background: var(--color-shadow)
+    display: flex
+    height: 100vh
+    height: 100dvh
+    inset: 0
+    justify-content: center
+    padding-top: min(12vh, 8rem)
+    padding-top: max(min(12vh, 8rem), env(safe-area-inset-top))
+    padding-right: env(safe-area-inset-right)
+    padding-bottom: env(safe-area-inset-bottom)
+    padding-left: env(safe-area-inset-left)
+    position: fixed
+    z-index: 50
+
+.dialog
+    background: var(--color-back)
+    border: 1px solid var(--color-subtle)
+    border-radius: var(--border-radius)
+    box-shadow: 0 1.8rem 5rem var(--color-shadow)
+    display: flex
+    flex-direction: column
+    max-height: calc(100vh - var(--spacing-md))
+    max-height: calc(100dvh - var(--spacing-md))
+    max-width: 640px
+    overflow: hidden
+    width: calc(100vw - var(--spacing-sm))
+
+.search-row
+    align-items: center
+    border-bottom: 1px solid var(--color-subtle)
+    color: var(--color-theme-dark)
+    display: flex
+    gap: var(--spacing-xs)
+    padding: 1.2rem 1.5rem
+
+    &:focus-within
+        box-shadow: inset 0 -2px var(--color-theme)
+
+.input
+    appearance: none
+    background: transparent
+    color: var(--color-front)
+    flex: 1
+    font: 400 1.7rem/1.4 var(--font-primary)
+    min-width: 0
+
+    &::placeholder
+        color: var(--color-subtle-dark)
+
+    &:focus-visible
+        outline: none
+
+    &::-webkit-search-cancel-button
+        cursor: pointer
+
+.close
+    align-items: center
+    background: transparent
+    border-radius: var(--border-radius)
+    color: var(--color-subtle-dark)
+    cursor: pointer
+    display: inline-flex
+    flex: 0 0 3rem
+    font: 400 2.4rem/1 var(--font-primary)
+    height: 3rem
+    justify-content: center
+
+    &:hover
+        background: var(--color-theme-light)
+        color: var(--color-theme-dark)
+
+    &:focus-visible
+        box-shadow: 0 0 0 3px var(--color-theme-opaque)
+        outline: 2px solid var(--color-theme-dark)
+        outline-offset: 2px
+
+.results
+    max-height: min(54vh, 42rem)
+    overflow-y: auto
+    padding: 0.8rem
+
+.result
+    border-radius: var(--border-radius)
+    color: var(--color-front)
+    display: flex
+    flex-direction: column
+    gap: 0.35rem
+    padding: var(--spacing-xs) 1.2rem
+
+    & + &
+        margin-top: 0.35rem
+
+    &:hover,
+    &:focus-visible,
+    &.is-selected
+        background: var(--color-theme-light)
+        box-shadow: inset 3px 0 var(--color-theme)
+
+    &:focus-visible
+        outline: 2px solid var(--color-theme-dark)
+        outline-offset: -2px
+
+.result-path
+    color: var(--color-theme-dark)
+    font: 600 var(--font-size-xs)/1.35 var(--font-secondary)
+
+.excerpt
+    color: var(--color-subtle-dark)
+    font: 400 var(--font-size-sm)/1.45 var(--font-primary)
+
+    mark
+        background: var(--color-theme-opaque)
+        color: var(--color-theme-dark)
+        font-weight: 600
+
+.state
+    color: var(--color-subtle-dark)
+    font: 400 var(--font-size-md)/1.5 var(--font-primary)
+    padding: 3rem 1.5rem
+    text-align: center
+
+    &:empty
+        display: none
+
+.footer
+    background: var(--color-subtle-light)
+    border-top: 1px solid var(--color-subtle)
+    color: var(--color-subtle-dark)
+    font: 400 var(--font-size-xs)/1 var(--font-primary)
+    padding: var(--spacing-xs) 1.5rem
+    text-align: right
+
+.retry
+    background: var(--color-theme-dark)
+    border-radius: var(--border-radius)
+    color: var(--color-back)
+    cursor: pointer
+    font: 600 var(--font-size-sm)/1 var(--font-primary)
+    margin-top: 1.5rem
+    padding: 0.85rem 1.2rem
+
+    &:hover
+        background: var(--color-theme)
+
+    &:focus-visible
+        box-shadow: 0 0 0 3px var(--color-theme-opaque)
+        outline: 2px solid var(--color-theme-dark)
+        outline-offset: 2px
+
+@include breakpoint(max, xs)
+    .trigger
+        height: 4rem
+        justify-content: center
+        padding: 0
+        width: 4rem
+
+    .trigger-label,
+    .shortcut
+        display: none
+
+    .backdrop
+        padding-top: var(--spacing-xs)
+        padding-top: max(var(--spacing-xs), env(safe-area-inset-top))
+
+    .dialog
+        max-height: calc(100vh - var(--spacing-sm))
+        max-height: calc(100dvh - var(--spacing-sm))
+
+    .footer
+        display: none
+
+@media (prefers-reduced-motion: no-preference)
+    .trigger,
+    .result,
+    .close,
+    .retry
+        transition: background-color 120ms ease, box-shadow 120ms ease

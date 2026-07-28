@@ -1,0 +1,87 @@
+---
+title: 第一个语音 Agent
+teaser: 使用阿里云 STT、Qwen LLM 和 CosyVoice TTS 启动 LiveKit Agent
+section: getting-started
+menu:
+  - ['准备环境变量', 'env']
+  - ['创建 Agent', 'agent']
+  - ['运行', 'run']
+  - ['改为 Realtime', 'realtime']
+---
+
+下面使用阿里云的 STT + LLM + TTS 组合展示 LiveKit Agents 的标准接入方式。
+
+## 准备环境变量 {id="env"}
+
+```bash
+DASHSCOPE_API_KEY=sk-ws-your-key
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your-livekit-key
+LIVEKIT_API_SECRET=your-livekit-secret
+```
+
+不要把真实密钥提交到 Git。开发环境可使用 `python-dotenv` 从 `.env` 加载。
+
+## 创建 Agent {id="agent"}
+
+```python
+from dotenv import load_dotenv
+from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
+from livekit.plugins import aliyun
+
+
+async def entrypoint(ctx: JobContext) -> None:
+    await ctx.connect()
+
+    session = AgentSession(
+        stt=aliyun.STT(model="paraformer-realtime-v2"),
+        llm=aliyun.LLM(model="qwen-plus"),
+        tts=aliyun.TTS(
+            model="cosyvoice-v2",
+            voice="longcheng",
+        ),
+    )
+
+    await session.start(
+        room=ctx.room,
+        agent=Agent(instructions="你是一个简洁、友好的中文语音助手。"),
+    )
+    await session.generate_reply(instructions="主动向用户问好。")
+
+
+if __name__ == "__main__":
+    load_dotenv()
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+```
+
+## 运行 {id="run"}
+
+控制台模式适合先验证麦克风、凭证和模型：
+
+```bash
+python agent.py console
+```
+
+接入 LiveKit 房间：
+
+```bash
+python agent.py dev
+```
+
+## 改为 Realtime {id="realtime"}
+
+Realtime 模型自身完成听、理解和说，只把一个 `RealtimeModel` 传给 `llm`：
+
+```python
+session = AgentSession(
+    llm=aliyun.RealtimeModel(
+        model="qwen-audio-3.0-realtime-plus",
+        voice="longanqian",
+        workspace_id="your-workspace-id",
+        turn_detection={"type": "smart_turn"},
+    )
+)
+```
+
+Realtime 模式不需要再配置独立的 STT 与 TTS。详细的音色、轮次检测、开场语和工具
+调用行为见[阿里云插件](/plugins/aliyun)与[Realtime 会话](/guides/realtime)。

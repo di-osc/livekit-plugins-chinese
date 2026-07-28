@@ -1,0 +1,113 @@
+---
+title: Realtime 会话
+teaser: 理解端到端实时语音、开场回复、轮次检测与工具结果生成
+section: guides
+menu:
+  - ['与流水线的区别', 'pipeline']
+  - ['LiveKit 做什么', 'livekit']
+  - ['开场回复', 'greeting']
+  - ['轮次检测', 'turn-detection']
+  - ['Smart Turn', 'smart-turn']
+  - ['工具结果', 'tool-result']
+  - ['延迟观测', 'latency']
+---
+
+## 与流水线的区别 {id="pipeline"}
+
+传统语音 Agent 的数据路径是：
+
+```text
+用户音频 → STT → 文本 LLM → TTS → 助手音频
+```
+
+Realtime 模型的数据路径是：
+
+```text
+用户音频 → Realtime 模型 → 助手音频 / 文本 / 工具调用
+```
+
+Realtime 模型已经直接接收音频，不依赖 LiveKit 再创建一条用户文本消息才能“听见”
+用户。用户转写消息主要用于 LiveKit 聊天上下文、字幕、日志和会话同步。
+
+## LiveKit 做什么 {id="livekit"}
+
+插件负责在 LiveKit Realtime 接口和厂商协议之间转换：
+
+- 接收 LiveKit 音频帧并重采样到模型要求的格式。
+- 把模型的 `speech_started`、`speech_stopped` 映射为 LiveKit 用户说话事件。
+- 把最终用户转写加入 LiveKit `ChatContext`。
+- 把模型音频和文本增量映射为生成内容。
+- 把 Function Calling 转成 LiveKit 工具执行，再把结果同步回模型。
+- 处理取消、打断、连接重试和会话关闭。
+
+## 开场回复 {id="greeting"}
+
+`session.generate_reply(instructions="主动问好")` 不是永久修改 Agent 的 system
+prompt，而是为这一轮生成附加指令。阿里云 Qwen Realtime 在尚无用户消息时不能直接
+创建 response，因此插件只在首次开场时合成一条用户触发消息：
+
+```python
+await session.generate_reply(
+    instructions="向用户问好，并询问需要什么帮助。"
+)
+```
+
+真实用户已经发言后，后续 `instructions` 继续作为一次性的本轮指令。
+
+## 轮次检测 {id="turn-detection"}
+
+Realtime 模型开启服务端轮次检测时，LiveKit 会忽略 `AgentSession` 外层另外配置的
+TurnDetector，并打印：
+
+```text
+turn_detection is a TurnDetector, but the LLM is a RealtimeModel with
+server-side turn detection enabled, ignoring the turn_detection setting
+```
+
+这是配置提示，不是故障。应在 Realtime 模型本身配置：
+
+```python
+aliyun.RealtimeModel(
+    turn_detection={"type": "smart_turn"},
+)
+```
+
+不要写 `aliyun.realtime.TurnDetection(...)`。`TurnDetection` 是类型联合，不是可
+实例化的类，所以那样会触发 `TypeError: 'types.UnionType' object is not callable`。
+
+## Smart Turn {id="smart-turn"}
+
+Qwen 的 smart turn 同时使用声学和语义判断：
+
+1. `input_audio_buffer.speech_started` 表示检测到用户开始发声。
+2. 声学停顿后服务端评估语义是否构成有效轮次。
+3. 只有确认有效结束，插件才把 LiveKit 用户状态推进到完整 turn 并允许创建回复。
+4. `turn invalid` 表示当前内容不足以形成有效轮次，不能把它当成最终对话结束。
+
+模型仍然直接接收此前的音频。LiveKit 的用户转写消息并不是模型听到音频的前提。
+
+## 工具结果 {id="tool-result"}
+
+工具完成时，LiveKit 会把 tool result 写入上下文并要求模型生成后续回复。若用户此时
+仍在说话，Qwen 会拒绝 `response.create`：
+
+```text
+Cannot create response while user is speaking.
+```
+
+阿里云插件直接跟踪 Qwen 的 speech 事件，在有效 `speech_stopped` 或 `response.done`
+之后重试待发送的响应请求。这比业务层只读一次 `ctx.session.user_state` 更可靠，因为
+单次读取和服务器事件之间存在竞态。
+
+## 延迟观测 {id="latency"}
+
+LiveKit 的 metrics 会区分输入结束、首个转写、LLM 首 token、TTS 首音频等阶段。
+Realtime 插件还记录：
+
+- 用户有效轮次结束到 `response.created`。
+- `response.created` 到首个文本或音频 delta。
+- 首个音频 delta 到 `response.done`。
+- 工具调用开始、完成和工具结果回复生成。
+
+排查延迟时先区分网络连接耗时、模型首包耗时和本地播放缓冲，不要只用“用户说完到
+听见声音”的总时长判断是哪一层变慢。

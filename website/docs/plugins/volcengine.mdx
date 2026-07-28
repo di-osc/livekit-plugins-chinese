@@ -1,0 +1,136 @@
+---
+title: 火山引擎
+teaser: 接入豆包语音 STT、TTS、方舟 LLM 与端到端实时语音
+section: plugins
+menu:
+  - ['安装与开通', 'setup']
+  - ['环境变量', 'env']
+  - ['STT + LLM + TTS', 'pipeline']
+  - ['Realtime', 'realtime']
+  - ['O 与 SC', 'models']
+  - ['参数速查', 'reference']
+---
+
+## 安装与开通 {id="setup"}
+
+```bash
+pip install livekit-plugins-volcengine
+```
+
+在[豆包语音控制台](https://console.volcengine.com/speech/app)创建应用，并分别开通需要
+的语音识别、语音合成或端到端实时语音资源。LLM 在
+[火山方舟控制台](https://console.volcengine.com/ark/)创建 API Key。
+
+## 环境变量 {id="env"}
+
+```bash
+VOLCENGINE_STT_APP_ID=your-stt-app-id
+VOLCENGINE_STT_ACCESS_TOKEN=your-stt-token
+VOLCENGINE_TTS_ACCESS_TOKEN=your-tts-token
+VOLCENGINE_LLM_API_KEY=your-ark-api-key
+VOLCENGINE_REALTIME_APP_ID=your-realtime-app-id
+VOLCENGINE_REALTIME_ACCESS_TOKEN=your-realtime-token
+```
+
+## STT + LLM + TTS {id="pipeline"}
+
+```python
+from livekit.agents import AgentSession
+from livekit.plugins import volcengine
+
+session = AgentSession(
+    stt=volcengine.STT(
+        resource_id="volc.seedasr.sauc.duration",
+        interim_results=True,
+    ),
+    llm=volcengine.LLM(
+        model="your-ark-endpoint-or-model-id",
+    ),
+    tts=volcengine.TTS(
+        app_id="your-tts-app-id",
+        resource_id="seed-tts-2.0",
+        voice="zh_female_xiaohe_uranus_bigtts",
+        sample_rate=24000,
+    ),
+)
+```
+
+`STT` 的 App ID 与 Token 可从环境变量读取。`TTS` 的 `app_id` 是必填构造参数，
+`access_token` 未传时读取 `VOLCENGINE_TTS_ACCESS_TOKEN`。
+
+## Realtime {id="realtime"}
+
+```python
+session = AgentSession(
+    llm=volcengine.RealtimeModel(
+        bot_name="豆包",
+        model="O",
+        speaker="zh_female_vv_jupiter_bigtts",
+        speaking_style="说话简洁、自然，语速适中。",
+        opening="你好，请问有什么可以帮你？",
+    )
+)
+```
+
+`app_id` 与 `access_token` 未传时分别读取 `VOLCENGINE_REALTIME_APP_ID` 和
+`VOLCENGINE_REALTIME_ACCESS_TOKEN`。
+
+## O 与 SC {id="models"}
+
+| 能力 | `O` | `SC` |
+| --- | --- | --- |
+| 联网搜索 | 支持 | 不支持 |
+| 外部 RAG | 支持 | 不支持 |
+| `bot_name` / `system_role` / `speaking_style` | 支持 | 受限 |
+| `character_manifest` | 不支持 | 支持 |
+| ICL / S_ 克隆音色 | 不支持 | 支持 |
+
+通用助手、客服和 RAG 场景优先使用 `O`；角色扮演与克隆音色场景使用 `SC`。具体资源
+权限和音色 ID 以[豆包语音官方文档](https://www.volcengine.com/docs/6561)为准。
+
+## 参数速查 {id="reference"}
+
+### STT
+
+```python
+volcengine.STT(
+    app_id=None,
+    access_token=None,
+    resource_id=None,
+    model_name="bigmodel",
+    enable_itn=False,
+    enable_punc=True,
+    vad_segment_duration=3000,
+    end_window_size=500,
+    interim_results=True,
+)
+```
+
+### TTS
+
+```python
+volcengine.TTS(
+    app_id="required",
+    access_token=None,
+    resource_id=None,
+    voice="zh_female_xiaohe_uranus_bigtts",
+    speed=1.0,
+    volume=1.0,
+    pitch=1.0,
+    sample_rate=16000,
+)
+```
+
+### Realtime
+
+```python
+volcengine.RealtimeModel(
+    bot_name="豆包",
+    speaker="zh_female_vv_jupiter_bigtts",
+    model="O",
+    end_smooth_window_ms=500,
+    enable_volc_websearch=False,
+    volc_websearch_type="web_summary",
+    audio_output=True,
+)
+```

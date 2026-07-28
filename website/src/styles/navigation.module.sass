@@ -1,0 +1,142 @@
+@import base
+
+.root
+    position: fixed
+    top: 0
+    left: 0
+    width: 100%
+    height: var(--height-nav)
+    background: var(--color-back)
+    color: var(--color-front)
+    align-items: center
+    display: flex
+    justify-content: space-between
+    flex-flow: row nowrap
+    padding: 0 0 0 1rem
+    z-index: 30
+    width: 100%
+    box-shadow: var(--box-shadow)
+
+.logo
+    min-width: 95px
+    width: 95px
+    height: 30px
+    color: var(--color-theme-dark) !important
+    vertical-align: middle
+
+.title
+    display: flex
+    align-items: center
+    gap: 0.65rem
+    color: var(--color-theme-dark)
+    white-space: nowrap
+
+.title-name
+    font: 700 1.7rem/1 var(--font-secondary)
+    letter-spacing: -0.035em
+
+.title-divider
+    width: 1px
+    height: 1.5rem
+    background: var(--color-subtle-dark)
+    opacity: 0.45
+
+.title-product
+    color: var(--color-subtle-dark)
+    font: 700 1rem/1 var(--font-secondary)
+    letter-spacing: 0.13em
+    text-transform: uppercase
+
+.list
+    display: flex
+    flex-flow: row nowrap
+    border-color: inherit
+    justify-content: flex-end
+    margin-bottom: 0.25rem
+
+.item
+    display: inline-flex
+    align-items: center
+    height: 100%
+    text-transform: uppercase
+    font-family: var(--font-secondary)
+    font-size: 1.6rem
+    font-weight: bold
+    color: var(--color-theme-dark)
+
+    &:not(:first-child)
+        margin-left: 2em
+
+    &:last-child
+        padding-right: 2rem
+
+    &:first-child
+        padding-left: 2rem
+
+.menu
+    display: flex
+    flex-flow: row nowrap
+    margin-left: auto
+    margin-right: var(--spacing-xs)
+
+.root > button
+    margin-right: 2rem
+
+.is-active
+    color: var(--color-dark)
+    pointer-events: none
+
+.github
+    text-transform: initial
+    margin-top: 0.25rem
+    margin-left: 1.5em !important
+
+    & > span
+        min-width: 100px
+
+.dropdown
+    --dropdown-text-color: var(--color-theme-dark)
+    font-family: var(--font-secondary)
+    font-size: 1.6rem
+    font-weight: bold
+    color: var(--color-theme-dark)
+    text-transform: uppercase
+    margin-right: 0.5rem
+    border: 2px solid var(--color-back)
+    border-radius: 2em
+
+    &:focus
+        border: 2px dotted var(--color-theme)
+        outline: none
+
+.has-alert
+    display: inline-flex
+    flex-flow: row nowrap
+    align-items: center
+
+.alert
+    font-size: 1.2rem
+    font-family: var(--font-primary)
+    display: inline-block
+    background: var(--color-yellow-opaque)
+    color: var(--color-dark)
+    border-radius: var(--border-radius)
+    margin-left: var(--spacing-xs)
+    padding: 0.5rem
+    line-height: var(--line-height-xs)
+    text-align: center
+
+@include breakpoint(max, md)
+    .alert
+        display: none
+
+@include breakpoint(max, xs)
+    .list
+        display: none
+
+    .has-alert
+        display: inline
+
+@include breakpoint(min, sm)
+    .dropdown
+        display: none

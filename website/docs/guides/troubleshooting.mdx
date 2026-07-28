@@ -1,0 +1,97 @@
+---
+title: 故障排查
+teaser: 根据日志快速定位凭证、轮次、开场、工具和音频问题
+section: guides
+menu:
+  - ['先检查什么', 'checklist']
+  - ['generate reply 超时', 'timeout']
+  - ['没有用户消息', 'no-user']
+  - ['用户正在说话', 'speaking']
+  - ['TurnDetection 不可调用', 'union']
+  - ['工具回复重复', 'duplicate']
+  - ['音频问题', 'audio']
+---
+
+## 先检查什么 {id="checklist"}
+
+1. 日志中的 `livekit.agents` 与插件版本是否匹配。
+2. 插件是否打印 `plugin registered`。
+3. 环境变量名是否与[密钥文档](/getting-started/credentials)一致。
+4. 服务商控制台是否开通了当前模型、音色和地域。
+5. Realtime WebSocket 是否连接成功并收到 `session.created`。
+
+## generate reply 超时 {id="timeout"}
+
+```text
+failed to generate a reply: generate_reply timed out
+```
+
+常见原因：
+
+- Realtime WebSocket 没有完成连接或鉴权。
+- 模型要求先存在用户消息，但开场逻辑直接调用了 `response.create`。
+- 工具结果回复被用户当前说话状态阻塞。
+- 服务端没有发出 `response.created`，而插件等待超时。
+
+阿里云插件已经为首次开场创建合成用户触发消息，并对用户说话竞态进行等待重试。仍然
+超时时，打开 Debug 日志检查前一个服务端事件和鉴权错误。
+
+## 没有用户消息 {id="no-user"}
+
+```text
+Cannot create response: conversation has no messages or no user message.
+```
+
+这是 Qwen Realtime 的协议约束。使用当前插件的：
+
+```python
+await session.generate_reply(instructions="向用户问好。")
+```
+
+不要在业务代码里直接向 Qwen 发送裸 `response.create`。
+
+## 用户正在说话 {id="speaking"}
+
+```text
+Cannot create response while user is speaking.
+```
+
+这通常发生在异步工具刚完成、LiveKit 准备生成工具回复，而 Qwen 仍认为用户正在发言。
+插件会缓存该次响应请求，并在有效 speech stop 后重试。若持续出现：
+
+- 检查是否把 `turn invalid` 错误当成了有效轮次结束。
+- 检查服务端是否收到连续噪声或回声，导致 speech state 无法结束。
+- 确认使用的是包含说话状态重试修复的当前源码。
+
+## TurnDetection 不可调用 {id="union"}
+
+```text
+TypeError: 'types.UnionType' object is not callable
+```
+
+不要实例化类型别名：
+
+```python
+# 错误
+aliyun.realtime.TurnDetection(...)
+
+# 正确
+aliyun.SmartTurnOptions(type="smart_turn")
+aliyun.ServerVadOptions(type="server_vad")
+```
+
+也可以直接传字典或 `None`。
+
+## 工具回复重复 {id="duplicate"}
+
+如果听到两次“正在查询订单”，通常是模型在工具调用前主动说了一次，随后
+`ctx.update()` 又触发一次。只保留一个进度来源，并在 system prompt 明确不重复播报。
+详见[异步工具调用](/guides/tools#duplicate)。
+
+## 音频问题 {id="audio"}
+
+- 音速明显异常：检查采样率是否与服务端实际返回一致。
+- Agent 自己打断自己：检查 AEC、扬声器回采和耳机设置。
+- 控制台前 3 秒不能打断：AEC warmup 期间 LiveKit 会暂时关闭 interruption，这是正常
+  日志。
+- 有转写无声音：确认 Realtime `modalities` 包含 `audio`，或传统流水线配置了 TTS。

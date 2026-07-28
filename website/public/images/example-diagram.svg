@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="240" viewBox="0 0 720 240" role="img" aria-labelledby="title description">
+  <title id="title">文档页面生成流程</title>
+  <desc id="description">MDX 文档和 JSON 配置经过 Next.js 构建，生成带 Pagefind 搜索的静态站点。</desc>
+  <rect width="720" height="240" rx="24" fill="#f4fbfe"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" text-anchor="middle">
+    <rect x="40" y="72" width="150" height="96" rx="12" fill="#ffffff" stroke="#09a3d5" stroke-width="3"/>
+    <text x="115" y="112" font-size="20" font-weight="700" fill="#16202b">MDX 文档</text>
+    <text x="115" y="140" font-size="15" fill="#4b5865">docs/</text>
+    <rect x="285" y="72" width="150" height="96" rx="12" fill="#ffffff" stroke="#09a3d5" stroke-width="3"/>
+    <text x="360" y="112" font-size="20" font-weight="700" fill="#16202b">Next.js 构建</text>
+    <text x="360" y="140" font-size="15" fill="#4b5865">npm run build</text>
+    <rect x="530" y="72" width="150" height="96" rx="12" fill="#ffffff" stroke="#09a3d5" stroke-width="3"/>
+    <text x="605" y="112" font-size="20" font-weight="700" fill="#16202b">静态站点</text>
+    <text x="605" y="140" font-size="15" fill="#4b5865">out/ + Pagefind</text>
+    <path d="M200 120h70" stroke="#09a3d5" stroke-width="4" stroke-linecap="round"/>
+    <path d="m260 110 12 10-12 10" fill="none" stroke="#09a3d5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M445 120h70" stroke="#09a3d5" stroke-width="4" stroke-linecap="round"/>
+    <path d="m505 110 12 10-12 10" fill="none" stroke="#09a3d5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

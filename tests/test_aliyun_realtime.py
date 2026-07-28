@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 from types import SimpleNamespace
 
 import aiohttp
 import pytest
 
 from livekit.agents import function_tool, llm
+from livekit.agents.types import APIConnectOptions
 from livekit.plugins.aliyun import realtime as aliyun_realtime
 from livekit.plugins.aliyun.realtime import (
     ClonedVoiceId,
@@ -241,7 +243,9 @@ async def test_session_waits_for_qwen_initialization_before_sending() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_error_fails_pending_generation_immediately() -> None:
+async def test_provider_error_logs_details_and_fails_pending_generation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     ws = _FakeWebSocket()
     model = RealtimeModel(
         api_key="test",
@@ -250,19 +254,79 @@ async def test_provider_error_fails_pending_generation_immediately() -> None:
     session = model.session()
     pending = session.generate_reply()
 
-    session._handle_server_event(
-        {
-            "type": "error",
-            "error": {
-                "type": "invalid_request_error",
-                "code": "invalid_value",
-                "message": "invalid session configuration",
+    with caplog.at_level(logging.WARNING, logger="livekit.plugins.aliyun"):
+        session._handle_server_event(
+            {
+                "type": "error",
+                "event_id": "provider-event-1",
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "invalid_value",
+                    "message": "invalid session configuration",
+                    "param": "session.turn_detection",
+                },
             },
-        }
-    )
+        )
 
     with pytest.raises(llm.RealtimeError, match="invalid session configuration"):
         await pending
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Qwen Audio Realtime returned a provider error"
+    )
+    assert record.provider_error_type == "invalid_request_error"  # type: ignore[attr-defined]
+    assert record.provider_error_code == "invalid_value"  # type: ignore[attr-defined]
+    assert record.provider_error_param == "session.turn_detection"  # type: ignore[attr-defined]
+    assert record.provider_event_id == "provider-event-1"  # type: ignore[attr-defined]
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_websocket_close_logs_code_reason_and_retry_context(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ws = _FakeWebSocket()
+    model = RealtimeModel(
+        api_key="test",
+        conn_options=APIConnectOptions(max_retry=0),
+        http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
+    )
+    session = model.session()
+
+    with caplog.at_level(logging.ERROR, logger="livekit.plugins.aliyun"):
+        await ws.incoming.put(
+            SimpleNamespace(
+                type=aiohttp.WSMsgType.CLOSE,
+                data=1006,
+                extra="upstream reset",
+            )
+        )
+        await _wait_until(
+            lambda: any(
+                record.getMessage()
+                == "Qwen Audio Realtime connection failed permanently"
+                for record in caplog.records
+            )
+        )
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Qwen Audio Realtime connection failed permanently"
+    )
+    assert record.error_type == "APIConnectionError"  # type: ignore[attr-defined]
+    assert record.attempt == 1  # type: ignore[attr-defined]
+    assert record.max_retry == 0  # type: ignore[attr-defined]
+    assert record.error_details == {  # type: ignore[attr-defined]
+        "phase": "receive",
+        "ws_message_type": "CLOSE",
+        "close_code": 1006,
+        "close_reason": "upstream reset",
+    }
 
     await session.aclose()
     await model.aclose()

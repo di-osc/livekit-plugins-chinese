@@ -1,0 +1,92 @@
+---
+title: 异步工具调用
+teaser: 让长耗时查询在后台执行，同时向用户播报进度和最终结果
+section: guides
+menu:
+  - ['何时使用', 'when']
+  - ['订单查询示例', 'example']
+  - ['避免重复播报', 'duplicate']
+  - ['Realtime 注意事项', 'realtime']
+  - ['取消与重复调用', 'cancellation']
+---
+
+## 何时使用 {id="when"}
+
+普通工具在返回前会阻塞工具回复。订单查询、外部搜索、文档处理等超过几秒的操作应使用
+LiveKit 异步工具：第一次 `ctx.update()` 后工具转为后台运行，Agent 可以继续与用户
+交互，最终返回值会在会话空闲时生成后续回复。
+
+## 订单查询示例 {id="example"}
+
+```python
+import asyncio
+
+from livekit.agents import Agent, RunContext, function_tool
+
+
+class BaojieAgent(Agent):
+    def __init__(self) -> None:
+        super().__init__(
+            instructions=(
+                "你是保洁客服。需要订单信息时调用 query_order。"
+                "工具调用后的进度提示只说一次；不要复述同一条进度。"
+                "拿到最终结果后再向用户简洁说明订单状态。"
+            )
+        )
+
+    @function_tool(on_duplicate="confirm")
+    async def query_order(
+        self,
+        ctx: RunContext,
+        order_number: str | None = None,
+    ) -> str:
+        """查询订单状态。
+
+        Args:
+            order_number: 订单号；用户未提供时查询最近一笔订单。
+        """
+        target = order_number or "最近一笔订单"
+        await ctx.update(f"正在查询{target}。")
+
+        async with ctx.with_filler(
+            "还在查询，请稍等一下。",
+            delay=5,
+        ):
+            await asyncio.sleep(8)
+
+        return "订单已接单，师傅明天上午 9 点上门。"
+```
+
+## 避免重复播报 {id="duplicate"}
+
+`ctx.update("正在查询订单")` 会进入聊天上下文并触发模型自然播报。如果 system prompt
+又要求“调用工具后先说正在查询”，模型可能自己先说一次，异步 update 再说一次。
+
+推荐规则：
+
+- 进度由 `ctx.update()` 负责，提示词明确“不要重复进度提示”。
+- 最终状态只通过工具 `return` 返回，不再调用一次内容相同的 `ctx.update()`。
+- `ctx.with_filler()` 只用于长时间静默，它直接播放语音，不进入模型上下文。
+
+## Realtime 注意事项 {id="realtime"}
+
+Realtime 模型收到工具最终结果后需要再创建一次模型 response 才能说出答案。如果用户
+正在说话，插件必须延迟 response，而不是立即强行生成。阿里云 Qwen 插件已经在协议层
+处理这个竞态；业务工具无需轮询 `ctx.session.user_state`。
+
+Qwen Audio 不支持强制 `tool_choice`。工具定义会发给模型，但命名强制选择会被忽略并
+记录警告。应通过清晰的工具描述和 Agent instructions 引导模型选择。
+
+## 取消与重复调用 {id="cancellation"}
+
+对可安全中止的只读任务，可以增加 `ToolFlag.CANCELLABLE`。订单写入、支付等不能安全
+回滚的操作不要随意标记为可取消。
+
+`on_duplicate` 按工具名称判断重复，而不是按参数：
+
+- `allow`：允许并行重复调用。
+- `reject`：拒绝新调用。
+- `replace`：取消旧调用并开始新调用，旧工具必须可取消。
+- `confirm`：让模型确认是否确实需要重复调用。
+
+完整行为见 [LiveKit Async tools](https://docs.livekit.io/agents/logic/tools/async/)。

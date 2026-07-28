@@ -1,0 +1,67 @@
+---
+title: 阶跃星辰
+teaser: 使用 Step Audio Realtime 构建端到端实时语音 Agent
+section: plugins
+menu:
+  - ['安装与密钥', 'setup']
+  - ['快速接入', 'quickstart']
+  - ['主要参数', 'parameters']
+  - ['注意事项', 'notes']
+---
+
+## 安装与密钥 {id="setup"}
+
+```bash
+pip install livekit-plugins-stepfun
+```
+
+在[阶跃星辰接口密钥页面](https://platform.stepfun.com/interface-key)创建 API Key：
+
+```bash
+STEPFUN_REALTIME_API_KEY=your-stepfun-key
+```
+
+## 快速接入 {id="quickstart"}
+
+```python
+from livekit.agents import Agent, AgentSession
+from livekit.plugins import stepfun
+
+session = AgentSession(
+    llm=stepfun.RealtimeModel(
+        model="step-1o-audio",
+        voice="ganliannvsheng",
+        modalities=["text", "audio"],
+        temperature=0.8,
+    )
+)
+
+await session.start(
+    room=ctx.room,
+    agent=Agent(instructions="你是一个友好的中文语音助手。"),
+)
+```
+
+## 主要参数 {id="parameters"}
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `model` | `str` | `step-1o-audio` | 实时语音模型 |
+| `voice` | `str` | `ganliannvsheng` | 平台音色 ID |
+| `modalities` | 文本 / 音频列表 | 文本 + 音频 | 输出模态 |
+| `temperature` | `float` | 插件默认值 | 生成随机性 |
+| `turn_detection` | 配置或 `None` | 服务端 VAD | 轮次检测 |
+| `speed` | `float \| None` | `None` | 合成语速 |
+| `base_url` | `str` | 官方 Realtime 地址 | 自定义端点 |
+| `max_session_duration` | 秒数或 `None` | 20 分钟 | 主动回收连接 |
+
+音色列表和实时协议可能随平台更新，请以
+[阶跃星辰 Realtime API 文档](https://platform.stepfun.com/docs/api-reference/realtime/chat)
+为准。
+
+## 注意事项 {id="notes"}
+
+- Realtime 模式不再单独配置 STT 与 TTS。
+- `turn_detection=None` 表示由调用方手动提交音频，不等于“关闭用户输入”。
+- 工具返回后仍由实时模型生成语音回复；业务工具本身只返回结构化结果。
+- API Key 缺失时连接会鉴权失败，建议在启动阶段主动校验环境变量。

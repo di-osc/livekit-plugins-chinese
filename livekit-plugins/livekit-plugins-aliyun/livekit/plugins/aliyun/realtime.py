@@ -136,6 +136,34 @@ _FATAL_ERROR_CODES = frozenset(
 )
 
 
+def _connection_error(
+    message: str,
+    *,
+    details: dict[str, Any],
+) -> APIConnectionError:
+    """Create a retryable connection error carrying safe diagnostic details."""
+    error = APIConnectionError(message)
+    error.body = details
+    return error
+
+
+def _api_error_log_fields(error: APIError) -> dict[str, Any]:
+    """Return structured, credential-free fields for connection failure logs."""
+    fields: dict[str, Any] = {
+        "error_type": type(error).__name__,
+        "error_message": str(error),
+        "retryable": error.retryable,
+    }
+    if error.body is not None:
+        fields["error_details"] = error.body
+    cause = error.__cause__
+    if cause is not None:
+        fields["cause_type"] = type(cause).__name__
+        if str(cause):
+            fields["cause_message"] = str(cause)
+    return fields
+
+
 @dataclass
 class _RealtimeOptions:
     """Fully resolved, immutable-at-construction model options."""
@@ -1053,6 +1081,14 @@ class RealtimeSession(
                     or self._closing
                 ):
                     if not self._closing:
+                        logger.error(
+                            "Qwen Audio Realtime connection failed permanently",
+                            extra={
+                                **_api_error_log_fields(error),
+                                "attempt": retries + 1,
+                                "max_retry": self._opts.conn_options.max_retry,
+                            },
+                        )
                         self._emit_error(error, recoverable=False)
                         self._fail_pending_generations(str(error))
                     return
@@ -1061,8 +1097,10 @@ class RealtimeSession(
                 logger.warning(
                     "Qwen Audio Realtime connection failed; retrying",
                     extra={
+                        **_api_error_log_fields(error),
                         "retry_interval": retry_interval,
                         "attempt": retries + 1,
+                        "max_retry": self._opts.conn_options.max_retry,
                     },
                 )
                 await asyncio.sleep(retry_interval)
@@ -1070,6 +1108,13 @@ class RealtimeSession(
                 reconnecting = True
             except Exception as error:
                 if not self._closing:
+                    logger.exception(
+                        "Qwen Audio Realtime session stopped unexpectedly",
+                        extra={
+                            "error_type": type(error).__name__,
+                            "error_message": str(error),
+                        },
+                    )
                     self._emit_error(error, recoverable=False)
                     self._fail_pending_generations(str(error))
                 return
@@ -1094,18 +1139,44 @@ class RealtimeSession(
             self._report_connection_acquired(time.perf_counter() - started)
             return ws
         except asyncio.TimeoutError as error:
-            raise APIConnectionError(
-                "Qwen Audio Realtime connection timed out"
+            raise _connection_error(
+                "Qwen Audio Realtime connection timed out",
+                details={
+                    "phase": "connect",
+                    "timeout_seconds": self._opts.conn_options.timeout,
+                },
             ) from error
         except aiohttp.ClientError as error:
-            raise APIConnectionError("Qwen Audio Realtime connection failed") from error
+            raise _connection_error(
+                "Qwen Audio Realtime connection failed",
+                details={"phase": "connect"},
+            ) from error
+
+    async def _send_ws_event(
+        self,
+        ws: aiohttp.ClientWebSocketResponse,
+        event: dict[str, Any],
+    ) -> None:
+        """Serialize and send one event while preserving WebSocket failures."""
+        payload = json.dumps(event)
+        try:
+            await ws.send_str(payload)
+        except (aiohttp.ClientError, ConnectionError, OSError, RuntimeError) as error:
+            raise _connection_error(
+                "Qwen Audio Realtime WebSocket send failed",
+                details={
+                    "phase": "send",
+                    "event_type": event.get("type"),
+                    "event_id": event.get("event_id"),
+                },
+            ) from error
 
     async def _send_direct(
         self, ws: aiohttp.ClientWebSocketResponse, event: dict[str, Any]
     ) -> None:
         event.setdefault("event_id", utils.shortuuid("event_"))
         self.emit("aliyun_client_event_queued", event)
-        await ws.send_str(json.dumps(event))
+        await self._send_ws_event(ws, event)
 
     async def _run_ws(
         self,
@@ -1141,7 +1212,7 @@ class RealtimeSession(
 
             async for event in self._msg_ch:
                 self.emit("aliyun_client_event_queued", event)
-                await ws.send_str(json.dumps(event))
+                await self._send_ws_event(ws, event)
                 if _DEBUG:
                     redacted = dict(event)
                     if redacted.get("type") == "input_audio_buffer.append":
@@ -1154,7 +1225,18 @@ class RealtimeSession(
 
         async def recv_task() -> None:
             while True:
-                message = await ws.receive()
+                try:
+                    message = await ws.receive()
+                except (
+                    aiohttp.ClientError,
+                    ConnectionError,
+                    OSError,
+                    RuntimeError,
+                ) as error:
+                    raise _connection_error(
+                        "Qwen Audio Realtime WebSocket receive failed",
+                        details={"phase": "receive"},
+                    ) from error
                 if message.type in {
                     aiohttp.WSMsgType.CLOSE,
                     aiohttp.WSMsgType.CLOSED,
@@ -1162,11 +1244,47 @@ class RealtimeSession(
                 }:
                     if expected_close:
                         return
-                    raise APIConnectionError(
-                        "Qwen Audio Realtime connection closed unexpectedly"
+                    message_data = getattr(message, "data", None)
+                    close_code = (
+                        message_data
+                        if isinstance(message_data, int)
+                        else getattr(ws, "close_code", None)
+                    )
+                    close_reason = getattr(message, "extra", None)
+                    if not close_reason and isinstance(message_data, str):
+                        close_reason = message_data
+                    raise _connection_error(
+                        "Qwen Audio Realtime connection closed unexpectedly",
+                        details={
+                            "phase": "receive",
+                            "ws_message_type": message.type.name,
+                            "close_code": close_code,
+                            "close_reason": close_reason,
+                        },
                     )
                 if message.type == aiohttp.WSMsgType.ERROR:
-                    raise APIConnectionError("Qwen Audio Realtime WebSocket failed")
+                    ws_exception_getter = getattr(ws, "exception", None)
+                    ws_exception = (
+                        ws_exception_getter() if callable(ws_exception_getter) else None
+                    )
+                    connection_error = _connection_error(
+                        "Qwen Audio Realtime WebSocket failed",
+                        details={
+                            "phase": "receive",
+                            "ws_message_type": message.type.name,
+                            "exception_type": (
+                                type(ws_exception).__name__
+                                if ws_exception is not None
+                                else None
+                            ),
+                            "exception_message": (
+                                str(ws_exception) if ws_exception is not None else None
+                            ),
+                        },
+                    )
+                    if isinstance(ws_exception, BaseException):
+                        raise connection_error from ws_exception
+                    raise connection_error
                 if message.type != aiohttp.WSMsgType.TEXT:
                     continue
                 event = json.loads(message.data)
@@ -1565,6 +1683,24 @@ class RealtimeSession(
                 return
 
         retryable = code not in _FATAL_ERROR_CODES
+        log_fields = {
+            "provider_error_type": error.get("type"),
+            "provider_error_code": code,
+            "provider_error_message": message,
+            "provider_error_param": param,
+            "provider_event_id": event.get("event_id"),
+            "retryable": retryable,
+        }
+        if retryable:
+            logger.warning(
+                "Qwen Audio Realtime returned a provider error",
+                extra=log_fields,
+            )
+        else:
+            logger.error(
+                "Qwen Audio Realtime returned a fatal provider error",
+                extra=log_fields,
+            )
         api_error = APIError(message, body=error, retryable=retryable)
         self._fail_pending_generations(message)
         if not retryable:

@@ -1,0 +1,9 @@
+{
+    "theme_color": "#1967d2",
+    "background_color": "#ffffff",
+    "display": "minimal-ui",
+    "scope": ".",
+    "start_url": ".",
+    "name": "LiveKit 中文插件文档",
+    "short_name": "LiveKit 中文插件"
+}

@@ -1,0 +1,61 @@
+.ol, .ul
+    margin-bottom: var(--spacing-md)
+    font: var(--font-size-md)/var(--line-height-md) var(--font-primary)
+
+.ol
+    counter-reset: li
+
+    li:before
+        content: counter(li, decimal) '.'
+        font-size: 1em
+        padding-right: 1rem
+        padding-top: 0
+
+.li
+    padding-left: 2rem
+    margin-bottom: 0.5em
+    margin-left: 1.25rem
+
+    p
+        display: inline-block
+        margin-bottom: var(--spacing-sm)
+
+    .ol, .ul
+        margin-top: var(--spacing-xs)
+        margin-bottom: var(--spacing-xs)
+
+    &:before
+        content: '\25CF'
+        position: relative
+        bottom: 1px
+        display: inline-block
+        font-size: 0.6em
+        font-weight: bold
+        padding-right: 1.5em
+        padding-top: 0.5em
+        margin-left: -3.75rem
+        text-align: right
+        width: 2.5rem
+        counter-increment: li
+        box-sizing: content-box
+        vertical-align: top
+
+.emoji:before
+    content: attr(data-emoji)
+    padding-right: 0.75em
+    padding-top: 0
+    margin-left: -2.5em
+    width: 1.75em
+    text-align: right
+    font-size: 1em
+    position: static
+
+.li-icon
+    text-indent: calc(-20px - 0.55em)
+
+    &:before
+        content: ""
+
+    .ul .ul &
+        text-indent: initial
+        margin-left: -20px

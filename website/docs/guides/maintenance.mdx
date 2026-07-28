@@ -1,0 +1,64 @@
+---
+title: 维护与迁移
+teaser: 当前维护范围、逐步取消支持的插件和迁移方向
+section: guides
+menu:
+  - ['维护范围', 'scope']
+  - ['逐步取消支持', 'deprecation']
+  - ['迁移建议', 'migration']
+  - ['贡献文档', 'contributing']
+---
+
+## 维护范围 {id="scope"}
+
+当前仓库重点维护以下插件：
+
+- `livekit-plugins-aliyun`
+- `livekit-plugins-volcengine`
+- `livekit-plugins-stepfun`
+- `livekit-plugins-difyai`
+- `livekit-plugins-flashtts`
+
+新功能、兼容性修复和文档会优先覆盖这些包。
+
+## 逐步取消支持 {id="deprecation"}
+
+项目后续将逐步取消 Baidu、MiniMax、Tencent、Xunfei 和 Zhipu 插件支持。逐步取消支持
+表示：
+
+- 不再作为新项目推荐选项。
+- 不保证跟进最新 LiveKit Agents 接口。
+- 安全或阻断性问题可能仍按实际情况处理，但不承诺新增功能。
+- 后续版本可能移除包源码、构建配置和文档入口。
+
+## 迁移建议 {id="migration"}
+
+| 原能力 | 推荐迁移方向 |
+| --- | --- |
+| Baidu / Tencent / Xunfei STT | 阿里云 Paraformer 或火山引擎豆包 STT |
+| MiniMax TTS | 阿里云 CosyVoice、火山引擎 TTS 或自托管 FlashTTS |
+| MiniMax / Zhipu LLM | 阿里云 Qwen、火山方舟或 Dify |
+| 多段式语音链路 | Qwen Audio 3.0 或豆包 Realtime |
+
+迁移时不要只替换类名，还要重新核对采样率、音色 ID、句尾检测、工具调用和模型提示词。
+建议为同一组录音建立回归测试，对比首包延迟、转写准确率和打断行为。
+
+## 贡献文档 {id="contributing"}
+
+文档站源码位于 `website/`。本地预览：
+
+```bash
+cd website
+npm ci
+npm run dev
+```
+
+提交前运行：
+
+```bash
+npm test
+npm run build
+```
+
+生产构建会生成 Pagefind 搜索索引。合并到 `main` 后，GitHub Actions 自动部署到项目的
+GitHub Pages 地址。

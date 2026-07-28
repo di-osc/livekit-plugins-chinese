@@ -1,0 +1,63 @@
+---
+title: 项目概览
+teaser: 面向中文语音与国内模型服务的 LiveKit Agents 插件集合
+section: getting-started
+menu:
+  - ['项目定位', 'positioning']
+  - ['当前支持', 'supported']
+  - ['如何选择', 'choose']
+  - ['运行要求', 'requirements']
+  - ['下一步', 'next']
+---
+
+`livekit-plugins-chinese` 为 LiveKit Agents 提供国内云厂商与开源语音服务适配。
+插件遵循 LiveKit 的 `STT`、`TTS`、`LLM` 和 `RealtimeModel` 接口，可以直接放入
+`AgentSession`，无需在业务代码中手动处理厂商 WebSocket 协议。
+
+## 项目定位 {id="positioning"}
+
+这个项目解决两类问题：
+
+- 把阿里云、火山引擎、阶跃星辰、Dify 和 FlashTTS 接入 LiveKit Agents。
+- 统一音频流、转写、生成、工具调用和会话生命周期，减少厂商协议差异泄漏到业务层。
+
+<Infobox title="版本基线" emoji="📌">
+
+当前仓库中的插件要求 Python 3.10 及以上，并与 `livekit-agents==1.6.7` 对齐。
+从源码运行时请使用仓库现有的 `.venv`，无需另外创建虚拟环境。
+
+</Infobox>
+
+## 当前支持 {id="supported"}
+
+| 插件 | STT | TTS | LLM | Realtime |
+| --- | --- | --- | --- | --- |
+| 阿里云 | ✓ | ✓ | ✓ | Qwen Audio 3.0 |
+| 火山引擎 | ✓ | ✓ | ✓ | 豆包端到端语音 |
+| 阶跃星辰 | — | — | — | Step Audio |
+| Dify | — | — | ✓ | — |
+| FlashTTS | — | ✓ | — | — |
+
+完整能力、安装包名和凭证要求见[支持矩阵](/plugins)。
+
+## 如何选择 {id="choose"}
+
+- 希望模型直接听语音并用语音回答：优先查看[阿里云 Realtime](/plugins/aliyun#realtime)
+  或[火山引擎 Realtime](/plugins/volcengine#realtime)。
+- 希望自由组合识别、文本模型和合成：选择阿里云或火山引擎的 STT + LLM + TTS。
+- 已经在 Dify 编排提示词、知识库或工作流：使用 [Dify LLM](/plugins/dify)。
+- 已自行部署开源 TTS：使用 [FlashTTS](/plugins/flashtts)。
+
+## 运行要求 {id="requirements"}
+
+- Python 3.10+
+- LiveKit Agents 1.6.7
+- 对应服务商已开通的模型或语音资源
+- LiveKit Cloud 凭证，或可用的自托管 LiveKit Server
+- Realtime 场景建议使用稳定的低延迟网络和 16 kHz 单声道麦克风输入
+
+## 下一步 {id="next"}
+
+先[安装需要的插件](/getting-started/installation)，再根据
+[密钥与环境变量](/getting-started/credentials)完成服务商配置。第一次接入可以直接
+从[第一个语音 Agent](/getting-started/first-agent)开始。
