@@ -115,7 +115,7 @@ class _RealtimeOptions:
     max_session_duration: float | None
     """reset the connection after this many seconds if provided"""
     conn_options: APIConnectOptions
-    model: str = "step-1o-audio"
+    model: str = "stepaudio-2.5-realtime"
 
 
 @dataclass
@@ -151,9 +151,7 @@ DEFAULT_TURN_DETECTION = TurnDetection(
     create_response=True,
     interrupt_response=True,
 )
-DEFAULT_INPUT_AUDIO_TRANSCRIPTION = InputAudioTranscription(
-    model="gpt-4o-mini-transcribe",
-)
+DEFAULT_INPUT_AUDIO_TRANSCRIPTION = None
 DEFAULT_TOOL_CHOICE = "auto"
 DEFAULT_MAX_RESPONSE_OUTPUT_TOKENS = "inf"
 
@@ -164,7 +162,7 @@ class RealtimeModel(llm.RealtimeModel):
     def __init__(
         self,
         *,
-        model: str = "step-1o-audio",
+        model: str = "stepaudio-2.5-realtime",
         voice: str = "ganliannvsheng",
         modalities: NotGivenOr[list[Literal["text", "audio"]]] = NOT_GIVEN,
         temperature: NotGivenOr[float] = NOT_GIVEN,
@@ -189,7 +187,8 @@ class RealtimeModel(llm.RealtimeModel):
             capabilities=llm.RealtimeCapabilities(
                 message_truncation=True,
                 turn_detection=turn_detection is not None,
-                user_transcription=input_audio_transcription is not None,
+                # StepFun Realtime emits input transcription events natively.
+                user_transcription=True,
                 auto_tool_reply_generation=False,
                 audio_output="audio" in modalities,
                 manual_function_calls=True,
@@ -746,11 +745,12 @@ class RealtimeSession(
             "output_audio_format": "pcm16",
             "modalities": self._realtime_model._opts.modalities,
             "turn_detection": turn_detection,
-            "input_audio_transcription": input_audio_transcription,
             "input_audio_noise_reduction": self._realtime_model._opts.input_audio_noise_reduction,
             "temperature": self._realtime_model._opts.temperature,
             "tool_choice": _to_oai_tool_choice(self._realtime_model._opts.tool_choice),
         }
+        if input_audio_transcription is not None:
+            kwargs["input_audio_transcription"] = input_audio_transcription
         if self._instructions is not None:
             kwargs["instructions"] = self._instructions
 

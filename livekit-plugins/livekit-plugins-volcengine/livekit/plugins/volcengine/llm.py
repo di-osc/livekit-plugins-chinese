@@ -39,7 +39,7 @@ class LLM(llm.LLM):
     def __init__(
         self,
         *,
-        model: str = "doubao-1-5-lite-32k-250115",
+        model: str = "doubao-seed-2-0-lite-260215",
         api_key: NotGivenOr[str] = NOT_GIVEN,
         base_url: NotGivenOr[str] = "https://ark.cn-beijing.volces.com/api/v3/",
         client: openai.AsyncClient | None = None,

@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import AsyncIterable, Optional, Dict
+from typing import Optional, Dict
 import time
 import aiohttp
 import asyncio
@@ -156,7 +156,9 @@ class TTS(tts.TTS):
     def synthesize(
         self,
         text: str,
-    ) -> AsyncIterable[tts.SynthesizedAudio]:
+        *,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+    ) -> tts.ChunkedStream:
         raise NotImplementedError
 
     def stream(
