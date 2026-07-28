@@ -542,6 +542,7 @@ class RealtimeSession(
             samples_per_channel=INPUT_SAMPLE_RATE // 10,
         )
         self._current_generation: _ResponseGeneration | None = None
+        self._cancelled_response_ids: set[str] = set()
         self._pending_generations: dict[
             str, asyncio.Future[llm.GenerationCreatedEvent]
         ] = {}
@@ -986,11 +987,15 @@ class RealtimeSession(
         return future
 
     def interrupt(self) -> None:
-        """Cancel the active or pending response, if one exists."""
-        if (
-            self._current_generation is not None
-            or self._inflight_response_create_id is not None
-        ):
+        """Cancel the active or pending response and stop local output immediately."""
+        if self._current_generation is not None:
+            self._cancel_active_generation(
+                reason="LiveKit interrupted the response",
+                send_cancel=True,
+            )
+        elif self._inflight_response_create_id is not None:
+            # response.create has left the client but response.created has not
+            # arrived yet, so there is no local generation to close.
             self.send_event({"type": "response.cancel"})
 
     def truncate(
@@ -1334,6 +1339,21 @@ class RealtimeSession(
 
     def _handle_server_event(self, event: dict[str, Any]) -> None:
         event_type = event.get("type")
+        response = event.get("response")
+        response_id = (
+            response.get("id")
+            if isinstance(response, dict)
+            else event.get("response_id")
+        )
+        if response_id in self._cancelled_response_ids:
+            # Local streams are closed synchronously on interruption so
+            # LiveKit can finish the interrupted SpeechHandle immediately.
+            # Qwen may still deliver buffered deltas before its cancelled
+            # response.done event; none of them belong to a future response.
+            if event_type == "response.done":
+                self._cancelled_response_ids.discard(response_id)
+            return
+
         if event_type == "session.created":
             self._server_session_created.set()
         elif event_type == "session.updated":
@@ -1341,6 +1361,15 @@ class RealtimeSession(
         elif event_type == "input_audio_buffer.speech_started":
             self._input_speaking = True
             self._turn_active = True
+            # In server_vad and smart_turn modes Qwen automatically cancels an
+            # active response when it detects new user speech. Do not send a
+            # redundant response.cancel here; close local output before
+            # notifying LiveKit so its interruption cleanup cannot wait on
+            # delayed provider events.
+            self._cancel_active_generation(
+                reason="Qwen detected new user speech",
+                send_cancel=False,
+            )
             self._refresh_response_create_ready()
             self.emit("input_speech_started", llm.InputSpeechStartedEvent())
         elif event_type == "input_audio_buffer.speech_stopped":
@@ -1591,6 +1620,16 @@ class RealtimeSession(
         if generation is None:
             return
         response = event.get("response") or {}
+        response_id = response.get("id")
+        if response_id and response_id != generation.response_id:
+            logger.debug(
+                "ignoring response.done for a stale Qwen response",
+                extra={
+                    "response_id": response_id,
+                    "active_response_id": generation.response_id,
+                },
+            )
+            return
         status = response.get("status", "completed")
         created = generation.created_timestamp
         duration = max(time.time() - created, 1e-9)
@@ -1714,6 +1753,28 @@ class RealtimeSession(
         self._current_generation = None
         if reason:
             logger.debug("Qwen realtime generation closed", extra={"reason": reason})
+
+    def _cancel_active_generation(
+        self,
+        *,
+        reason: str,
+        send_cancel: bool,
+    ) -> None:
+        """Stop one response locally without cancelling its background tools.
+
+        Args:
+            reason: Diagnostic reason written to the debug log.
+            send_cancel: Whether the client must send ``response.cancel``.
+                Server-managed VAD interruptions set this to ``False`` because
+                Qwen has already started cancellation itself.
+        """
+        generation = self._current_generation
+        if generation is None:
+            return
+        if send_cancel:
+            self.send_event({"type": "response.cancel"})
+        self._cancelled_response_ids.add(generation.response_id)
+        self._close_generation(reason)
 
     def _fail_pending_generations(self, reason: str) -> None:
         """Fail every response request still waiting for ``response.created``."""

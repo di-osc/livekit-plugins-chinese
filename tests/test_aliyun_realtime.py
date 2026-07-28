@@ -365,6 +365,77 @@ async def test_smart_turn_marks_invalid_stopped_turns_as_not_transcribed() -> No
 
 
 @pytest.mark.asyncio
+async def test_speech_started_closes_active_response_and_ignores_late_events() -> None:
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    generations: list[llm.GenerationCreatedEvent] = []
+    session.on("generation_created", generations.append)
+
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "interrupted-response", "status": "in_progress"},
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.output_item.added",
+            "response_id": "interrupted-response",
+            "item": {"id": "interrupted-message", "type": "message"},
+        }
+    )
+    message = await anext(generations[0].message_stream.__aiter__())
+
+    session._handle_server_event({"type": "input_audio_buffer.speech_started"})
+
+    assert session._current_generation is None
+    assert "interrupted-response" in session._cancelled_response_ids
+    with pytest.raises(StopAsyncIteration):
+        await anext(message.text_stream.__aiter__())
+    with pytest.raises(StopAsyncIteration):
+        await anext(message.audio_stream.__aiter__())
+
+    # Buffered events from the cancelled response must not be attached to the
+    # next generation or reopen the interrupted output streams.
+    session._handle_server_event(
+        {
+            "type": "response.audio.delta",
+            "response_id": "interrupted-response",
+            "item_id": "interrupted-message",
+            "delta": base64.b64encode(b"\x01\x00").decode(),
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "next-response", "status": "in_progress"},
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.done",
+            "response": {
+                "id": "interrupted-response",
+                "status": "cancelled",
+                "status_details": {
+                    "type": "cancelled",
+                    "reason": "turn_detected",
+                },
+            },
+        }
+    )
+    assert session._current_generation is not None
+    assert session._current_generation.response_id == "next-response"
+    assert "interrupted-response" not in session._cancelled_response_ids
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
 async def test_response_create_waits_for_valid_smart_turn_response_done() -> None:
     ws = _FakeWebSocket()
     model = RealtimeModel(
