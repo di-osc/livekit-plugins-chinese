@@ -2,9 +2,11 @@
 
 该项目为[livekit-agents](https://github.com/livekit/agents)**实时语音智能体**框架提供中文插件支持。
 
+📚 在线文档：[https://di-osc.github.io/livekit-plugins-chinese/](https://di-osc.github.io/livekit-plugins-chinese/)
+
 ## 近期修改
 
-停止对以下厂商插件的支持：
+后续将逐步取消以下厂商插件的支持：
 - 百度
 - MiniMax（迁移到Livekit官方插件支持）
 - 腾讯
@@ -13,6 +15,7 @@
 
 新增：
 - 阿里云Realtime模型支持
+- 基于 GitHub Pages 的在线插件文档
 
 
 ## 插件列表
