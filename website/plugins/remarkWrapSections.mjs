@@ -16,6 +16,24 @@ const defaultOptions = {
 function remarkWrapSection(userOptions = {}) {
     const options = Object.assign({}, defaultOptions, userOptions)
 
+    const moveCodeExamplesToAside = (children) => {
+        const codeExamples = children.filter((node) => node.type === 'code')
+        if (!codeExamples.length) return children
+
+        const narrative = children.filter((node) => node.type !== 'code')
+        narrative.push({
+            type: 'blockquote',
+            children: codeExamples,
+            data: {
+                hProperties: {
+                    title: '代码示例',
+                    'data-docs-code-examples': '',
+                },
+            },
+        })
+        return narrative
+    }
+
     function transformer(tree) {
         const headingsMap = []
         const newTree = []
@@ -41,9 +59,11 @@ function remarkWrapSection(userOptions = {}) {
                 const sectionStartIndex = index === 0 ? 0 : headingsMap[index - 1].index
                 const sectionEndIndex =
                     index === headingsMap.length ? tree.children.length : headingsMap[index].index
-                const children = tree.children
-                    .slice(sectionStartIndex, sectionEndIndex)
-                    .filter((node) => node.type !== 'import')
+                const children = moveCodeExamplesToAside(
+                    tree.children
+                        .slice(sectionStartIndex, sectionEndIndex)
+                        .filter((node) => node.type !== 'import')
+                )
 
                 if (children.length) {
                     const headingId = index === 0 ? 0 : headingsMap[index - 1].id

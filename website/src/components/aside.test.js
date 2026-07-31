@@ -18,3 +18,13 @@ test('renders a titled Example as complementary content', () => {
     expect(screen.getAllByRole('complementary')[0]).toHaveTextContent('npm run dev')
     expect(screen.getByText('Example')).toBeInTheDocument()
 })
+
+test('forwards documentation markers to the aside element', () => {
+    const { container } = render(
+        <Aside title="代码示例" data-docs-code-examples="">
+            <code>uv add livekit-plugins-aliyun</code>
+        </Aside>
+    )
+
+    expect(container.querySelector('aside')).toHaveAttribute('data-docs-code-examples')
+})

@@ -5,7 +5,9 @@ $triangle-size: 2rem
 $border-radius: 6px
 
 .root
-    position: relative
+    // Desktop examples are positioned against their enclosing documentation
+    // section, while mobile examples remain in normal document flow.
+    position: static
 
 .content
     --font-size-sm: 1.2rem

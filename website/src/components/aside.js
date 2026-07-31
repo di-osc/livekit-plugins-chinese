@@ -3,7 +3,7 @@ import PropTypes from 'prop-types'
 
 import classes from '../styles/aside.module.sass'
 
-export default function Aside({ title, children }) {
+export default function Aside({ title, children, ...props }) {
     const rootRef = useRef(null)
     const contentRef = useRef(null)
 
@@ -48,7 +48,7 @@ export default function Aside({ title, children }) {
     }, [])
 
     return (
-        <aside className={classes.root} ref={rootRef}>
+        <aside className={classes.root} ref={rootRef} {...props}>
             <div
                 className={classes.content}
                 data-docs-aside-content
