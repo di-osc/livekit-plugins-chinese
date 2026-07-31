@@ -4,18 +4,25 @@
 
 📚 在线文档：[https://di-osc.github.io/livekit-plugins-chinese/](https://di-osc.github.io/livekit-plugins-chinese/)
 
-## 近期修改
+<details>
+<summary><strong>📌 近期更新与支持计划</strong></summary>
 
-后续将逐步取消以下厂商插件的支持：
+### ✨ 新增
+
+- 阿里云 Qwen Audio Realtime 模型支持
+- 基于 GitHub Pages 的[在线插件文档](https://di-osc.github.io/livekit-plugins-chinese/)
+
+### 📦 支持调整
+
+以下厂商插件将逐步停止维护：
+
 - 百度
-- MiniMax（迁移到Livekit官方插件支持）
+- MiniMax（建议迁移至 LiveKit 官方插件）
 - 腾讯
 - 讯飞
 - 智谱
 
-新增：
-- 阿里云Realtime模型支持
-- 基于 GitHub Pages 的在线插件文档
+</details>
 
 
 ## 插件列表
