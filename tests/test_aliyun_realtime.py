@@ -468,6 +468,83 @@ async def test_speech_started_closes_active_response_and_ignores_late_events() -
 
 
 @pytest.mark.asyncio
+async def test_late_output_after_response_done_is_ignored() -> None:
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "completed-response", "status": "in_progress"},
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.done",
+            "response": {"id": "completed-response", "status": "completed"},
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.audio_transcript.delta",
+            "response_id": "completed-response",
+            "item_id": "late-message",
+            "delta": "迟到的字幕",
+        }
+    )
+
+    assert session._current_generation is None
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stale_output_is_not_attached_to_new_response() -> None:
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+
+    session._handle_server_event(
+        {
+            "type": "response.created",
+            "response": {"id": "new-response", "status": "in_progress"},
+        }
+    )
+    session._handle_server_event(
+        {
+            "type": "response.audio_transcript.delta",
+            "response_id": "old-response",
+            "item_id": "old-message",
+            "delta": "上一轮的迟到字幕",
+        }
+    )
+
+    generation = session._current_generation
+    assert generation is not None
+    assert generation.response_id == "new-response"
+    assert generation.messages == {}
+
+    session._handle_server_event(
+        {
+            "type": "response.audio_transcript.delta",
+            "response_id": "new-response",
+            "item_id": "new-message",
+            "delta": "当前轮字幕",
+        }
+    )
+    assert set(generation.messages) == {"new-message"}
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
 async def test_response_create_waits_for_valid_smart_turn_response_done() -> None:
     ws = _FakeWebSocket()
     model = RealtimeModel(

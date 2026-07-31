@@ -135,6 +135,18 @@ _FATAL_ERROR_CODES = frozenset(
         "account_deactivated",
     }
 )
+_RESPONSE_OUTPUT_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.audio_transcript.delta",
+        "response.text.delta",
+        "response.audio.delta",
+        "response.function_call_arguments.done",
+        "response.output_item.done",
+    }
+)
+"""Response-scoped output events that must match the active generation."""
 
 
 @dataclass(frozen=True)
@@ -1410,6 +1422,36 @@ class RealtimeSession(
                 )
                 self._cancelled_response_ids.discard(response_id)
             return
+
+        if event_type in _RESPONSE_OUTPUT_EVENT_TYPES:
+            generation = self._current_generation
+            if generation is None:
+                # Qwen can occasionally deliver buffered output after the
+                # corresponding response.done event. WebSocket ordering means
+                # a valid new response must announce response.created first,
+                # so output received while idle is necessarily stale.
+                logger.debug(
+                    "ignoring Qwen output event without an active response",
+                    extra={
+                        "event_type": event_type,
+                        "response_id": response_id,
+                        "item_id": event.get("item_id"),
+                    },
+                )
+                return
+            if response_id is not None and response_id != generation.response_id:
+                # Never attach delayed output from an earlier response to the
+                # streams belonging to a newer LiveKit generation.
+                logger.debug(
+                    "ignoring Qwen output event for a stale response",
+                    extra={
+                        "event_type": event_type,
+                        "response_id": response_id,
+                        "active_response_id": generation.response_id,
+                        "item_id": event.get("item_id"),
+                    },
+                )
+                return
 
         if event_type == "session.created":
             self._server_session_created.set()
