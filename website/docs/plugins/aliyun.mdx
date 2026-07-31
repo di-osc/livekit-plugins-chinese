@@ -192,6 +192,19 @@ Qwen 的 Realtime 协议要求创建响应前对话中已有用户消息。插�
 真实用户消息时，把 `generate_reply(instructions="...")` 转换为合成的用户触发消息；
 后续 `instructions` 仍作为本轮附加指令。
 
+### Realtime 模式可以使用 `session.say()` 吗？
+
+可以。插件会把固定话术包装为一次强约束的朗读指令，并通过当前 Qwen Audio Realtime
+连接生成音频，不需要另外配置 TTS：
+
+```python
+speech = session.say("好的，正在为您转接人工客服。")
+await speech.wait_for_playout()
+```
+
+Qwen Audio Realtime 是对话模型而不是确定性 TTS，因此这里属于“尽量逐字朗读”。
+如果业务要求金额、验证码或合规话术必须一字不差，应使用独立的 TTS 模型。
+
 ### 为什么出现“不支持 forcing tool_choice”？
 
 Qwen Audio Realtime 由模型自动选择工具，不支持 LiveKit 强制指定某个工具。插件会
