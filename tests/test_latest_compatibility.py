@@ -1,4 +1,5 @@
 import inspect
+from dataclasses import replace
 
 import pytest
 
@@ -8,6 +9,7 @@ from livekit.plugins.stepfun.realtime import (
     RealtimeModel as StepFunRealtimeModel,
     RealtimeSession as StepFunRealtimeSession,
 )
+from livekit.plugins.volcengine.realtime import RealtimeModel as VolcengineRealtimeModel
 from livekit.plugins.volcengine.llm import LLM as VolcengineLLM
 
 
@@ -43,6 +45,7 @@ def test_stepfun_session_update_omits_transcriber_by_default() -> None:
     instance = StepFunRealtimeModel(api_key="test")
     session = object.__new__(StepFunRealtimeSession)
     session._realtime_model = instance
+    session._opts = replace(instance._opts)
     session._instructions = None
 
     event = session._create_session_update_event()
@@ -53,3 +56,41 @@ def test_stepfun_session_update_omits_transcriber_by_default() -> None:
     )
 
     assert "input_audio_transcription" not in payload["session"]
+
+
+@pytest.mark.parametrize(
+    "model_class",
+    [StepFunRealtimeModel, VolcengineRealtimeModel],
+)
+def test_realtime_models_accept_agents_turn_detection_keyword(model_class) -> None:
+    signature = inspect.signature(model_class.session)
+
+    assert "turn_detection_disabled" in signature.parameters
+    assert (
+        signature.parameters["turn_detection_disabled"].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )
+
+
+def test_stepfun_session_can_disable_server_turn_detection() -> None:
+    instance = StepFunRealtimeModel(api_key="test")
+    session = object.__new__(StepFunRealtimeSession)
+    session._realtime_model = instance
+    session._opts = replace(instance._opts, turn_detection=None)
+    session._instructions = None
+
+    event = session._create_session_update_event()
+    payload = event.model_dump(
+        by_alias=True,
+        exclude_unset=True,
+        exclude_defaults=False,
+    )
+
+    assert payload["session"]["turn_detection"] is None
+
+
+def test_stepfun_model_reports_session_turn_detection_capability_when_available() -> None:
+    instance = StepFunRealtimeModel(api_key="test")
+
+    if hasattr(instance.capabilities, "can_disable_turn_detection"):
+        assert instance.capabilities.can_disable_turn_detection is True

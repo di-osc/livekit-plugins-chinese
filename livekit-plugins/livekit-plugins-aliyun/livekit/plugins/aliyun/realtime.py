@@ -451,24 +451,28 @@ class RealtimeModel(llm.RealtimeModel):
             if is_given(turn_detection)
             else copy.deepcopy(DEFAULT_TURN_DETECTION)
         )
-        super().__init__(
-            capabilities=llm.RealtimeCapabilities(
-                message_truncation=False,
-                turn_detection=turn_detection_value is not None,
-                user_transcription=True,
-                auto_tool_reply_generation=False,
-                audio_output="audio" in modalities_value,
-                manual_function_calls=True,
-                mutable_chat_context=True,
-                mutable_instructions=True,
-                mutable_tools=True,
-                per_response_tool_choice=False,
-                # Qwen Audio Realtime has no native deterministic TTS command.
-                # The adapter implements LiveKit say() as a best-effort
-                # instruction-driven response when audio output is enabled.
-                supports_say="audio" in modalities_value,
-            )
+        capabilities = llm.RealtimeCapabilities(
+            message_truncation=False,
+            turn_detection=turn_detection_value is not None,
+            user_transcription=True,
+            auto_tool_reply_generation=False,
+            audio_output="audio" in modalities_value,
+            manual_function_calls=True,
+            mutable_chat_context=True,
+            mutable_instructions=True,
+            mutable_tools=True,
+            per_response_tool_choice=False,
+            # Qwen Audio Realtime has no native deterministic TTS command.
+            # The adapter implements LiveKit say() as a best-effort
+            # instruction-driven response when audio output is enabled.
+            supports_say="audio" in modalities_value,
         )
+        # ``can_disable_turn_detection`` was added to LiveKit Agents after
+        # 1.6.7. Keep the adapter importable on both sides of that API change
+        # while advertising the capability to newer runtimes.
+        if hasattr(capabilities, "can_disable_turn_detection"):
+            setattr(capabilities, "can_disable_turn_detection", True)
+        super().__init__(capabilities=capabilities)
 
         api_key_value = api_key or os.getenv("DASHSCOPE_API_KEY")
         if not api_key_value:
@@ -574,9 +578,9 @@ class RealtimeModel(llm.RealtimeModel):
                 self._http_session_owned = True
         return self._http_session
 
-    def session(self) -> RealtimeSession:
+    def session(self, *, turn_detection_disabled: bool = False) -> RealtimeSession:
         """Create and track a new independent realtime conversation session."""
-        session = RealtimeSession(self)
+        session = RealtimeSession(self, turn_detection_disabled=turn_detection_disabled)
         self._sessions.add(session)
         return session
 
@@ -601,7 +605,12 @@ class RealtimeSession(
     payload is the raw JSON-compatible ``dict[str, Any]`` protocol event.
     """
 
-    def __init__(self, realtime_model: RealtimeModel) -> None:
+    def __init__(
+        self,
+        realtime_model: RealtimeModel,
+        *,
+        turn_detection_disabled: bool = False,
+    ) -> None:
         """Create and immediately start one Qwen WebSocket session.
 
         Args:
@@ -609,6 +618,8 @@ class RealtimeSession(
                 credentials, endpoint, audio, VAD, history, and retry options.
                 Options are copied so later per-session updates do not mutate
                 sibling sessions.
+            turn_detection_disabled (bool): Disable Qwen's server-side turn
+                detection for this session when LiveKit is driving turn-taking.
 
         Notes:
             Construction must occur inside a running asyncio event loop because
@@ -616,7 +627,13 @@ class RealtimeSession(
         """
         super().__init__(realtime_model)
         self._realtime_model: RealtimeModel = realtime_model
-        self._opts: _RealtimeOptions = replace(realtime_model._opts)
+        self._turn_detection_disabled = turn_detection_disabled
+        self._opts: _RealtimeOptions = replace(
+            realtime_model._opts,
+            turn_detection=(
+                None if turn_detection_disabled else realtime_model._opts.turn_detection
+            ),
+        )
         self._tools: llm.ToolContext = llm.ToolContext.empty()
         self._chat_ctx: llm.ChatContext = llm.ChatContext.empty()
         self._instructions: str | None = None
@@ -734,8 +751,13 @@ class RealtimeSession(
             self._opts.voice = voice
             changes["voice"] = voice
         if is_given(turn_detection):
-            self._opts.turn_detection = copy.deepcopy(turn_detection)
-            changes["turn_detection"] = copy.deepcopy(turn_detection)
+            resolved_turn_detection = (
+                None
+                if self._turn_detection_disabled
+                else copy.deepcopy(turn_detection)
+            )
+            self._opts.turn_detection = resolved_turn_detection
+            changes["turn_detection"] = copy.deepcopy(resolved_turn_detection)
         if is_given(tool_choice):
             self._opts.tool_choice = tool_choice
             if tool_choice not in (None, "auto"):

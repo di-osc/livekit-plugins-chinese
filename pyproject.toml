@@ -5,10 +5,11 @@ requires-python = ">=3.10"
 
 [tool.uv]
 constraint-dependencies = [
-    "livekit-agents==1.6.7",
+    "livekit-agents==1.6.10",
 ]
 
 [tool.uv.sources]
+livekit-agents = { index = "pypi" }
 livekit-plugins-volcengine = { workspace = true }
 livekit-plugins-xunfei = { workspace = true }
 livekit-plugins-baidu = { workspace = true }
@@ -48,3 +49,7 @@ dev = [
 [[tool.uv.index]]
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple/"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"

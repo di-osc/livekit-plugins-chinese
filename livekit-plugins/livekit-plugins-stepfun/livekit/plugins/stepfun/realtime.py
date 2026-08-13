@@ -9,7 +9,7 @@ import os
 import time
 import weakref
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal, Optional, Union, cast
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -183,17 +183,23 @@ class RealtimeModel(llm.RealtimeModel):
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> None:
         modalities = modalities if is_given(modalities) else ["text", "audio"]
-        super().__init__(
-            capabilities=llm.RealtimeCapabilities(
-                message_truncation=True,
-                turn_detection=turn_detection is not None,
-                # StepFun Realtime emits input transcription events natively.
-                user_transcription=True,
-                auto_tool_reply_generation=False,
-                audio_output="audio" in modalities,
-                manual_function_calls=True,
-            )
+        turn_detection_value = (
+            turn_detection if is_given(turn_detection) else DEFAULT_TURN_DETECTION
         )
+        capabilities = llm.RealtimeCapabilities(
+            message_truncation=True,
+            turn_detection=turn_detection_value is not None,
+            # StepFun Realtime emits input transcription events natively.
+            user_transcription=True,
+            auto_tool_reply_generation=False,
+            audio_output="audio" in modalities,
+            manual_function_calls=True,
+        )
+        # Keep compatibility with Agents 1.6.7 while advertising the
+        # session-scoped switch to Agents 1.6.9 and later.
+        if hasattr(capabilities, "can_disable_turn_detection"):
+            setattr(capabilities, "can_disable_turn_detection", True)
+        super().__init__(capabilities=capabilities)
 
         api_key = api_key or os.environ.get("STEPFUN_REALTIME_API_KEY")
 
@@ -211,9 +217,7 @@ class RealtimeModel(llm.RealtimeModel):
             if is_given(input_audio_transcription)
             else DEFAULT_INPUT_AUDIO_TRANSCRIPTION,
             input_audio_noise_reduction=input_audio_noise_reduction,
-            turn_detection=turn_detection
-            if is_given(turn_detection)
-            else DEFAULT_TURN_DETECTION,
+            turn_detection=turn_detection_value,
             api_key=api_key,
             base_url=base_url_val,
             entra_token=entra_token,
@@ -297,8 +301,8 @@ class RealtimeModel(llm.RealtimeModel):
 
         return self._http_session
 
-    def session(self) -> RealtimeSession:
-        sess = RealtimeSession(self)
+    def session(self, *, turn_detection_disabled: bool = False) -> RealtimeSession:
+        sess = RealtimeSession(self, turn_detection_disabled=turn_detection_disabled)
         self._sessions.add(sess)
         return sess
 
@@ -347,9 +351,21 @@ class RealtimeSession(
     - openai_client_event_queued: expose the raw client events sent to the OpenAI Realtime API
     """
 
-    def __init__(self, realtime_model: RealtimeModel) -> None:
+    def __init__(
+        self,
+        realtime_model: RealtimeModel,
+        *,
+        turn_detection_disabled: bool = False,
+    ) -> None:
         super().__init__(realtime_model)
         self._realtime_model: RealtimeModel = realtime_model
+        self._turn_detection_disabled = turn_detection_disabled
+        self._opts = replace(
+            realtime_model._opts,
+            turn_detection=(
+                None if turn_detection_disabled else realtime_model._opts.turn_detection
+            ),
+        )
         self._tools = llm.ToolContext.empty()
         self._msg_ch = utils.aio.Chan[Union[RealtimeClientEvent, dict[str, Any]]]()
         self._input_resampler: rtc.AudioResampler | None = None
@@ -390,13 +406,13 @@ class RealtimeSession(
     @utils.log_exceptions(logger=logger)
     async def _main_task(self) -> None:
         num_retries: int = 0
-        max_retries = self._realtime_model._opts.conn_options.max_retry
+        max_retries = self._opts.conn_options.max_retry
 
         async def _reconnect() -> None:
             logger.debug(
                 "reconnecting to OpenAI Realtime API",
                 extra={
-                    "max_session_duration": self._realtime_model._opts.max_session_duration
+                    "max_session_duration": self._opts.max_session_duration
                 },
             )
 
@@ -463,7 +479,7 @@ class RealtimeSession(
                     self._emit_error(e, recoverable=True)
 
                     retry_interval = (
-                        self._realtime_model._opts.conn_options._interval_for_retry(
+                        self._opts.conn_options._interval_for_retry(
                             num_retries
                         )
                     )
@@ -483,12 +499,12 @@ class RealtimeSession(
 
     async def _create_ws_conn(self) -> aiohttp.ClientWebSocketResponse:
         headers = {"User-Agent": "LiveKit Agents"}
-        headers["Authorization"] = f"Bearer {self._realtime_model._opts.api_key}"
+        headers["Authorization"] = f"Bearer {self._opts.api_key}"
         headers["OpenAI-Beta"] = "realtime=v1"
 
         url = process_base_url(
-            self._realtime_model._opts.base_url,
-            self._realtime_model._opts.model,
+            self._opts.base_url,
+            self._opts.model,
         )
 
         if lk_oai_debug:
@@ -498,7 +514,7 @@ class RealtimeSession(
             self._realtime_model._ensure_http_session().ws_connect(
                 url=url, headers=headers
             ),
-            self._realtime_model._opts.conn_options.timeout,
+            self._opts.conn_options.timeout,
         )
 
     async def _run_ws(self, ws_conn: aiohttp.ClientWebSocketResponse) -> None:
@@ -669,9 +685,9 @@ class RealtimeSession(
             asyncio.create_task(_send_task(), name="_send_task"),
         ]
         wait_reconnect_task: asyncio.Task | None = None
-        if self._realtime_model._opts.max_session_duration is not None:
+        if self._opts.max_session_duration is not None:
             wait_reconnect_task = asyncio.create_task(
-                asyncio.sleep(self._realtime_model._opts.max_session_duration),
+                asyncio.sleep(self._opts.max_session_duration),
                 name="_timeout_task",
             )
             tasks.append(wait_reconnect_task)
@@ -697,7 +713,7 @@ class RealtimeSession(
 
     def _create_session_update_event(self) -> SessionUpdateEvent:
         input_audio_transcription_opts = (
-            self._realtime_model._opts.input_audio_transcription
+            self._opts.input_audio_transcription
         )
         input_audio_transcription = (
             session_update_event.SessionInputAudioTranscription.model_validate(
@@ -711,7 +727,7 @@ class RealtimeSession(
             else None
         )
 
-        turn_detection_opts = self._realtime_model._opts.turn_detection
+        turn_detection_opts = self._opts.turn_detection
         turn_detection = (
             session_update_event.SessionTurnDetection.model_validate(
                 turn_detection_opts.model_dump(
@@ -724,7 +740,7 @@ class RealtimeSession(
             else None
         )
 
-        tracing_opts = self._realtime_model._opts.tracing
+        tracing_opts = self._opts.tracing
         if isinstance(tracing_opts, TracingTracingConfiguration):
             tracing: session_update_event.SessionTracing | None = (
                 session_update_event.SessionTracingTracingConfiguration.model_validate(
@@ -739,23 +755,23 @@ class RealtimeSession(
             tracing = tracing_opts
 
         kwargs: dict[str, Any] = {
-            "model": self._realtime_model._opts.model,
-            "voice": self._realtime_model._opts.voice,
+            "model": self._opts.model,
+            "voice": self._opts.voice,
             "input_audio_format": "pcm16",
             "output_audio_format": "pcm16",
-            "modalities": self._realtime_model._opts.modalities,
+            "modalities": self._opts.modalities,
             "turn_detection": turn_detection,
-            "input_audio_noise_reduction": self._realtime_model._opts.input_audio_noise_reduction,
-            "temperature": self._realtime_model._opts.temperature,
-            "tool_choice": _to_oai_tool_choice(self._realtime_model._opts.tool_choice),
+            "input_audio_noise_reduction": self._opts.input_audio_noise_reduction,
+            "temperature": self._opts.temperature,
+            "tool_choice": _to_oai_tool_choice(self._opts.tool_choice),
         }
         if input_audio_transcription is not None:
             kwargs["input_audio_transcription"] = input_audio_transcription
         if self._instructions is not None:
             kwargs["instructions"] = self._instructions
 
-        if self._realtime_model._opts.speed is not None:
-            kwargs["speed"] = self._realtime_model._opts.speed
+        if self._opts.speed is not None:
+            kwargs["speed"] = self._opts.speed
 
         if tracing:
             kwargs["tracing"] = tracing
@@ -798,45 +814,48 @@ class RealtimeSession(
 
         if is_given(tool_choice):
             tool_choice = cast(Optional[llm.ToolChoice], tool_choice)
-            self._realtime_model._opts.tool_choice = tool_choice
+            self._opts.tool_choice = tool_choice
             kwargs["tool_choice"] = _to_oai_tool_choice(tool_choice)
 
         if is_given(voice):
-            self._realtime_model._opts.voice = voice
+            self._opts.voice = voice
             kwargs["voice"] = voice
 
         if is_given(temperature):
-            self._realtime_model._opts.temperature = temperature
+            self._opts.temperature = temperature
             kwargs["temperature"] = temperature
 
         if is_given(turn_detection):
-            self._realtime_model._opts.turn_detection = turn_detection
-            kwargs["turn_detection"] = turn_detection
+            resolved_turn_detection = (
+                None if self._turn_detection_disabled else turn_detection
+            )
+            self._opts.turn_detection = resolved_turn_detection
+            kwargs["turn_detection"] = resolved_turn_detection
 
         if is_given(max_response_output_tokens):
-            self._realtime_model._opts.max_response_output_tokens = (
+            self._opts.max_response_output_tokens = (
                 max_response_output_tokens  # type: ignore
             )
             kwargs["max_response_output_tokens"] = max_response_output_tokens
 
         if is_given(input_audio_transcription):
-            self._realtime_model._opts.input_audio_transcription = (
+            self._opts.input_audio_transcription = (
                 input_audio_transcription
             )
             kwargs["input_audio_transcription"] = input_audio_transcription
 
         if is_given(input_audio_noise_reduction):
-            self._realtime_model._opts.input_audio_noise_reduction = (
+            self._opts.input_audio_noise_reduction = (
                 input_audio_noise_reduction
             )
             kwargs["input_audio_noise_reduction"] = input_audio_noise_reduction
 
         if is_given(speed):
-            self._realtime_model._opts.speed = speed
+            self._opts.speed = speed
             kwargs["speed"] = speed
 
         if is_given(tracing):
-            self._realtime_model._opts.tracing = cast(Union[Tracing, None], tracing)
+            self._opts.tracing = cast(Union[Tracing, None], tracing)
             kwargs["tracing"] = cast(Union[Tracing, None], tracing)
 
         if kwargs:
@@ -974,7 +993,7 @@ class RealtimeSession(
         return SessionUpdateEvent(
             type="session.update",
             session=session_update_event.Session.model_construct(
-                model=self._realtime_model._opts.model,
+                model=self._opts.model,
                 tools=oai_tools,
             ),
             event_id=utils.shortuuid("tools_update_"),
@@ -1118,7 +1137,7 @@ class RealtimeSession(
         self, _: InputAudioBufferSpeechStoppedEvent
     ) -> None:
         user_transcription_enabled = (
-            self._realtime_model._opts.input_audio_transcription is not None
+            self._opts.input_audio_transcription is not None
         )
         self.emit(
             "input_speech_stopped",

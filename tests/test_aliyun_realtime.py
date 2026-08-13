@@ -203,6 +203,24 @@ async def test_initial_generation_instruction_becomes_qwen_user_message() -> Non
 
 
 @pytest.mark.asyncio
+async def test_session_can_disable_server_turn_detection() -> None:
+    model = RealtimeModel(
+        api_key="test",
+        turn_detection=aliyun_realtime.ServerVadOptions(
+            type="server_vad",
+            silence_duration_ms=800,
+        ),
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session(turn_detection_disabled=True)
+
+    assert session._opts.turn_detection is None
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
 async def test_later_generation_instruction_remains_system_message() -> None:
     model = RealtimeModel(
         api_key="test",

@@ -10,7 +10,7 @@ import weakref
 import gzip
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Callable
 
 import aiohttp
@@ -343,8 +343,12 @@ class RealtimeModel(llm.RealtimeModel):
 
         return self._http_session
 
-    def session(self) -> RealtimeSession:
-        sess = RealtimeSession(self)
+    def session(self, *, turn_detection_disabled: bool = False) -> RealtimeSession:
+        # The Volcengine dialogue protocol owns turn detection and does not
+        # expose a session-level switch. Accept the Agents 1.6.9 keyword so
+        # the framework can create the session without a TypeError; the
+        # capability remains false, so external turn handling is unsupported.
+        sess = RealtimeSession(self, turn_detection_disabled=turn_detection_disabled)
         self._sessions.add(sess)
         return sess
 
@@ -367,10 +371,18 @@ class RealtimeSession(
     - volcengine_client_event_queued: expose the raw client events sent to the OpenAI Realtime API
     """
 
-    def __init__(self, realtime_model: RealtimeModel) -> None:
+    def __init__(
+        self,
+        realtime_model: RealtimeModel,
+        *,
+        turn_detection_disabled: bool = False,
+    ) -> None:
         super().__init__(realtime_model)
         self._realtime_model: RealtimeModel = realtime_model
-        self._opts = realtime_model._opts
+        # Keep a session-local copy for API compatibility and future provider
+        # support. Volcengine currently has no turn_detection field to alter.
+        self._opts = replace(realtime_model._opts)
+        self._turn_detection_disabled = turn_detection_disabled
         self._tools = llm.ToolContext.empty()
         self._msg_ch = utils.aio.Chan[rtc.AudioFrame]()
         self._input_resampler: rtc.AudioResampler | None = None
