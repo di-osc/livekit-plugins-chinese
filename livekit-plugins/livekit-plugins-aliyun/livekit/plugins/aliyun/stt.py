@@ -100,6 +100,10 @@ class STTOptions:
         return params
 
 
+def _timestamp(value: int | float | None) -> float:
+    return 0.0 if value is None else float(value)
+
+
 class STT(stt.STT):
     def __init__(
         self,
@@ -292,8 +296,8 @@ class SpeechStream(stt.SpeechStream):
         if event_type == "result-generated":
             output = data["payload"]["output"]["sentence"]
             is_sentence_end = output["sentence_end"]
-            start_time = output["begin_time"]
-            end_time = output["end_time"]
+            start_time = _timestamp(output["begin_time"])
+            end_time = _timestamp(output["end_time"])
             text = output["text"]
             if not self._speaking:
                 start_event = stt.SpeechEvent(type=stt.SpeechEventType.START_OF_SPEECH)
@@ -352,8 +356,8 @@ def live_transcription_to_speech_data(
     return [
         stt.SpeechData(
             language=language,
-            start_time=data["begin_time"],
-            end_time=data["end_time"],
+            start_time=_timestamp(data["begin_time"]),
+            end_time=_timestamp(data["end_time"]),
             confidence=0.0,
             text=data["text"],
         )
