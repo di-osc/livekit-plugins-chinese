@@ -38,6 +38,8 @@ def to_chat_ctx(
     # group the message and function_calls
     item_groups: dict[str, list[llm.ChatItem]] = OrderedDict()
     for item in chat_ctx.items:
+        if item.type not in {"message", "function_call", "function_call_output"}:
+            continue
         if (
             item.type == "message" and item.role == "assistant"
         ) or item.type == "function_call":
