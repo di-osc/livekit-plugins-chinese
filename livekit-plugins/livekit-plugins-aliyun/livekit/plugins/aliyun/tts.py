@@ -100,8 +100,10 @@ class TTS(tts.TTS):
         *,
         api_key: Optional[str] = None,
         sample_rate: int = 24000,
-        voice: str = "longcheng",
-        model: str = "cosyvoice-v2",
+        # 该模型和音色组合同时支持新加坡、中国（北京）。
+        # CosyVoice 音色与模型版本绑定，不能跨版本混用。
+        voice: str = "longanyang",
+        model: str = "cosyvoice-v3-flash",
         speech_rate: int = 1,
         volume: int = 100,
         rate: float = 1.0,

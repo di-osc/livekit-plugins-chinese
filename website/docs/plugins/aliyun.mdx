@@ -19,7 +19,7 @@ menu:
 ## 支持能力 {id="capabilities"}
 
 - STT：Paraformer 实时语音识别，默认模型为 `paraformer-realtime-v2`。
-- TTS：CosyVoice 流式语音合成，默认模型为 `cosyvoice-v2`。
+- TTS：CosyVoice 流式语音合成，默认模型为 `cosyvoice-v3-flash`，默认音色为 `longanyang`。
 - LLM：百炼 OpenAI 兼容接口中的 Qwen 文本模型，默认模型为 `qwen-plus`。
 - Realtime：`qwen-audio-3.0-realtime-plus` 和 `qwen-audio-3.0-realtime-flash`。
 
@@ -78,8 +78,8 @@ stt = aliyun.STT(
 
 ```python
 tts = aliyun.TTS(
-    model="cosyvoice-v2",
-    voice="longcheng",
+    model="cosyvoice-v3-flash",
+    voice="longanyang",
     sample_rate=24000,
     volume=100,
     rate=1.0,
@@ -87,12 +87,34 @@ tts = aliyun.TTS(
 )
 ```
 
+### 模型与音色兼容关系
+
+CosyVoice 的音色不能跨模型版本混用，`model` 和 `voice` 必须使用同一版本的组合。
+插件默认使用 `cosyvoice-v3-flash` 与 `longanyang`，这组参数同时支持新加坡和中国（北京）地域。
+
+| 模型 | 新加坡 | 中国（北京） | 音色说明 |
+| --- | --- | --- | --- |
+| `cosyvoice-v3-flash` | ✅ | ✅ | 可使用官方 v3 音色，例如 `longanyang`。 |
+| `cosyvoice-v3-plus` | ✅ | ✅ | 可使用官方 v3 音色，例如 `longanyang`。 |
+| `cosyvoice-v2` | — | ✅ | 只能使用 v2 音色，例如 `longxiaochun_v2`；不建议作为默认模型。 |
+| `cosyvoice-v3.5-plus` | — | ✅ | 仅支持声音复刻或声音设计生成的自定义音色，不提供系统音色。 |
+| `cosyvoice-v3.5-flash` | — | ✅ | 仅支持声音复刻或声音设计生成的自定义音色，不提供系统音色。 |
+
+以上地域和模型限制以[阿里云官方实时语音合成文档](https://www.alibabacloud.com/help/en/model-studio/realtime-tts-user-guide)
+及[官方 CosyVoice 音色列表](https://www.alibabacloud.com/help/en/model-studio/cosyvoice-voice-list)为准。
+
+如果使用 `cosyvoice-v2`，必须显式传入 v2 音色：
+
+```python
+tts = aliyun.TTS(model="cosyvoice-v2", voice="longxiaochun_v2")
+```
+
 ### 参数说明
 
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `model` | `str` | `cosyvoice-v2` | CosyVoice 合成模型。模型必须支持所选音色。 |
-| `voice` | `str` | `longcheng` | 音色 ID。可用音色取决于 `model`，请以[百炼语音合成模型页面](https://bailian.console.aliyun.com/model-market?capabilities=%5B%22TTS%22%5D)为准。 |
+| `model` | `str` | `cosyvoice-v3-flash` | CosyVoice 合成模型。模型必须支持所选音色，并且需要与 API Key 所属地域匹配。 |
+| `voice` | `str` | `longanyang` | 音色 ID。音色必须与模型版本匹配；可用音色以[官方 CosyVoice 音色列表](https://www.alibabacloud.com/help/en/model-studio/cosyvoice-voice-list)为准。 |
 | `sample_rate` | `int` | `24000` | 输出采样率，单位为 Hz。支持 `8000`、`16000`、`22050`、`24000`、`44100` 和 `48000`。 |
 | `speech_rate` | `int` | `1` | 历史兼容参数，不会覆盖实际请求中的 `rate`；调整语速请使用 `rate`。 |
 | `volume` | `int` | `100` | 输出音量，取值范围为 `0` 到 `100`。 |

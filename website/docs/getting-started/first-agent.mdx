@@ -37,8 +37,8 @@ async def entrypoint(ctx: JobContext) -> None:
         stt=aliyun.STT(model="paraformer-realtime-v2"),
         llm=aliyun.LLM(model="qwen-plus"),
         tts=aliyun.TTS(
-            model="cosyvoice-v2",
-            voice="longcheng",
+            model="cosyvoice-v3-flash",
+            voice="longanyang",
         ),
     )
 
@@ -53,6 +53,9 @@ if __name__ == "__main__":
     load_dotenv()
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
 ```
+
+这里使用的 `cosyvoice-v3-flash` 和 `longanyang` 同时支持新加坡和中国（北京）。模型与音色必须匹配；
+其他 CosyVoice 模型的地域和音色限制见[阿里云插件文档](/plugins/aliyun#tts)。
 
 ## 运行 {id="run"}
 
