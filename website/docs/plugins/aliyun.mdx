@@ -51,8 +51,28 @@ stt = aliyun.STT(
 )
 ```
 
-`vocabulary_id` 是百炼热词表 ID。`max_sentence_silence` 控制句尾静音毫秒数；越小
-结束越快，但更容易把一句话切成多段。
+### 参数说明
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `model` | `str` | `paraformer-realtime-v2` | Paraformer 实时识别模型。使用其他模型前，请确认该模型已在百炼业务空间中开通。 |
+| `language` | `str \| None` | `zh` | 识别语言。流式识别需要明确的语言值，示例中的 `zh` 表示中文。 |
+| `interim_results` | `bool` | `True` | 是否返回中间识别结果。开启后，Agent 可以在用户说话过程中持续更新文本；句子结束时仍会返回最终结果。 |
+| `max_sentence_silence` | `int` | `500` | 句尾静音阈值，单位为毫秒。值越小，结束响应越快，但更容易把一句话切成多段；值越大，等待时间更长，长句更不容易被截断。 |
+| `disfluency_removal_enabled` | `bool` | `False` | 是否过滤“嗯”“啊”等语气词。 |
+| `semantic_punctuation_enabled` | `bool` | `False` | 是否启用基于语义的断句。开启后，服务端会结合语义判断句子边界。 |
+| `punctuation_prediction_enabled` | `bool` | `True` | 是否启用标点预测。 |
+| `inverse_text_normalization_enabled` | `bool` | `True` | 是否启用文本逆归一化，将数字、日期等内容按更适合阅读的形式输出。 |
+| `vocabulary_id` | `str \| None` | `None` | 百炼热词表 ID。传入后会提高专有名词、产品名等热词的识别稳定性；不使用热词时保持为 `None`。 |
+| `workspace` | `str \| None` | `None` | 百炼业务空间 ID。需要使用指定业务空间时传入。 |
+
+`api_key` 不需要写在构造参数中，插件会读取 `DASHSCOPE_API_KEY` 环境变量。热词表需要先在
+[百炼热词表服务](https://help.aliyun.com/zh/model-studio/custom-hot-words)
+中创建，再将返回的 ID 传给 `vocabulary_id`。
+
+流式识别必须提供明确的 `language`，当前模式不支持用 `detect_language` 自动选择语言。
+构造函数仍接受 `detect_language` 和 `punctuate`，但当前流式实现不会使用这两个兼容参数；标点行为
+请通过 `semantic_punctuation_enabled`、`punctuation_prediction_enabled` 等参数控制。
 
 ## TTS {id="tts"}
 
@@ -61,16 +81,26 @@ tts = aliyun.TTS(
     model="cosyvoice-v2",
     voice="longcheng",
     sample_rate=24000,
-    speech_rate=1,
     volume=100,
     rate=1.0,
     pitch=1.0,
 )
 ```
 
-`voice` 使用所选 CosyVoice 模型支持的音色 ID。模型与音色列表以
-[百炼语音合成模型页面](https://bailian.console.aliyun.com/model-market?capabilities=%5B%22TTS%22%5D)
-为准。
+### 参数说明
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `model` | `str` | `cosyvoice-v2` | CosyVoice 合成模型。模型必须支持所选音色。 |
+| `voice` | `str` | `longcheng` | 音色 ID。可用音色取决于 `model`，请以[百炼语音合成模型页面](https://bailian.console.aliyun.com/model-market?capabilities=%5B%22TTS%22%5D)为准。 |
+| `sample_rate` | `int` | `24000` | 输出采样率，单位为 Hz。支持 `8000`、`16000`、`22050`、`24000`、`44100` 和 `48000`。 |
+| `speech_rate` | `int` | `1` | 历史兼容参数，不会覆盖实际请求中的 `rate`；调整语速请使用 `rate`。 |
+| `volume` | `int` | `100` | 输出音量，取值范围为 `0` 到 `100`。 |
+| `rate` | `float` | `1.0` | 语速倍率，取值范围为 `0.5` 到 `2.0`；大于 `1` 加快，小于 `1` 减慢。 |
+| `pitch` | `float` | `1.0` | 音调倍率，取值范围为 `0.5` 到 `2.0`；大于 `1` 升高，小于 `1` 降低。 |
+| `max_session_duration` | `float` | `600` | 单个 TTS WebSocket 连接的最长复用时间，单位为秒。连接池到达时长上限后会自动更新连接。 |
+
+`api_key` 不需要写在构造参数中，插件会读取 `DASHSCOPE_API_KEY` 环境变量。
 
 ## LLM {id="llm"}
 
@@ -80,6 +110,25 @@ llm = aliyun.LLM(
     temperature=0.7,
 )
 ```
+
+### 参数说明
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `model` | `str` | `qwen-plus` | 百炼 OpenAI 兼容接口使用的模型 ID。模型需要已在业务空间中开通。 |
+| `api_key` | `str \| None` | `DASHSCOPE_API_KEY` | 百炼 API Key。未显式传入时从环境变量读取。 |
+| `user` | `str` | 未传入 | 调用方标识，会作为请求中的 `user` 字段发送。 |
+| `temperature` | `float` | 未传入 | OpenAI 兼容的生成随机性参数。当前版本构造函数接受该参数，但不会自动转发到请求。 |
+| `parallel_tool_calls` | `bool` | 未传入 | 是否允许一次响应并行产生多个工具调用。 |
+| `tool_choice` | `ToolChoice` | 未传入 | 工具选择策略，可使用 `auto`、`none`、`required` 或指定函数。 |
+| `store` | `bool` | 未传入 | OpenAI 兼容的响应存储参数。当前版本构造函数接受该参数，但不会自动转发到请求。 |
+| `metadata` | `dict[str, str]` | 未传入 | 附加到请求中的元数据。 |
+| `timeout` | `httpx.Timeout \| None` | 连接 15 秒、读取/写入/连接池各 5 秒 | HTTP 客户端超时配置。 |
+
+`api_key` 未显式传入时会读取 `DASHSCOPE_API_KEY` 环境变量。
+
+当前版本会自动转发 `user`、`metadata`、`parallel_tool_calls` 和 `tool_choice`；如果业务依赖
+`temperature` 或 `store`，请先确认适配器版本是否已支持对应请求字段。
 
 这个适配器使用百炼 OpenAI 兼容端点，支持 LiveKit 工具调用。`model` 可替换为业务
 空间已经开通的 Qwen 模型 ID。

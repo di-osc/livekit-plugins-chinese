@@ -105,16 +105,34 @@ session = AgentSession(
 ```python
 volcengine.STT(
     app_id=None,
+    base_url="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
     access_token=None,
     resource_id=None,
     model_name="bigmodel",
     enable_itn=False,
     enable_punc=True,
+    enable_ddc=False,
     vad_segment_duration=3000,
     end_window_size=500,
+    force_to_speech_time=1000,
     interim_results=True,
 )
 ```
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `app_id` | `str \| None` | `VOLCENGINE_STT_APP_ID` | 豆包语音应用 ID。未显式传入时从环境变量读取。 |
+| `base_url` | `str` | `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel` | 流式识别 WebSocket 地址。通常保持默认值。 |
+| `access_token` | `str \| None` | `VOLCENGINE_STT_ACCESS_TOKEN` | 豆包语音访问 Token。未显式传入时从环境变量读取。 |
+| `resource_id` | `str \| None` | `None` | 识别资源 ID。不同资源对应不同版本或计费方式，需使用控制台已开通的资源。 |
+| `model_name` | `str` | `bigmodel` | 服务端识别模型名称。 |
+| `enable_itn` | `bool` | `False` | 是否启用逆文本规范化，将数字、日期等内容转换为更适合阅读的形式。 |
+| `enable_punc` | `bool` | `True` | 是否启用自动标点。 |
+| `enable_ddc` | `bool` | `False` | 是否启用服务端 DDC 处理，具体效果取决于所开通的识别资源。 |
+| `vad_segment_duration` | `int` | `3000` | VAD 分段时长，单位为毫秒，用于限制单段语音的最大处理窗口。 |
+| `end_window_size` | `int` | `500` | 句尾判断窗口，单位为毫秒。值越小越快结束，值越大越不容易过早截断。 |
+| `force_to_speech_time` | `int` | `1000` | 强制判定为语音的时间窗口，单位为毫秒；具体边界以服务端协议为准。 |
+| `interim_results` | `bool` | `True` | 是否向 LiveKit 声明支持中间结果。开启后可在说话过程中持续更新识别文本。 |
 
 ### TTS
 
@@ -130,6 +148,43 @@ volcengine.TTS(
     sample_rate=16000,
 )
 ```
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `app_id` | `str` | 必填 | 豆包语音应用 ID。可以从控制台获取。 |
+| `access_token` | `str \| None` | `VOLCENGINE_TTS_ACCESS_TOKEN` | 访问 Token。未显式传入时从环境变量读取。 |
+| `resource_id` | `str \| None` | `seed-tts-2.0` | TTS 资源 ID。不同资源支持的模型、音色和计费方式不同。 |
+| `voice` | `str` | `zh_female_xiaohe_uranus_bigtts` | 音色 ID，必须与 `resource_id` 匹配。 |
+| `speed` | `float` | `1.0` | 语速倍率，取值范围为 `0.2` 到 `3.0`。当前版本构造函数接受该参数，但不会自动发送到请求。 |
+| `volume` | `float` | `1.0` | 音量倍率，取值范围为 `0.1` 到 `3.0`。当前版本构造函数接受该参数，但不会自动发送到请求。 |
+| `pitch` | `float` | `1.0` | 音调倍率，取值范围为 `0.1` 到 `3.0`。当前版本构造函数接受该参数，但不会自动发送到请求。 |
+| `sample_rate` | `8000` / `16000` / `24000` | `16000` | 输出采样率，单位为 Hz。应与下游音频链路的采样率保持一致。 |
+
+当前版本的火山 TTS 请求实际发送音色、音频格式和采样率；语速、音量和音调使用服务端默认值。
+
+### LLM
+
+```python
+volcengine.LLM(
+    model="your-ark-endpoint-or-model-id",
+)
+```
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `model` | `str` | `doubao-seed-2-0-lite-260215` | 火山方舟模型 ID 或 Endpoint ID。示例中的值替换为实际已部署的模型。 |
+| `api_key` | `str \| None` | `VOLCENGINE_LLM_API_KEY` | 方舟 API Key。未显式传入时从环境变量读取。 |
+| `base_url` | `str` | `https://ark.cn-beijing.volces.com/api/v3/` | OpenAI 兼容 API 地址；使用其他地域或代理时可替换。 |
+| `user` | `str \| None` | 未传入 | 调用方标识，可用于服务端区分用户或会话。 |
+| `temperature` | `float` | 未传入 | OpenAI 兼容的生成随机性参数。当前版本构造函数接受该参数，但不会自动转发到请求。 |
+| `parallel_tool_calls` | `bool` | 未传入 | 是否允许一次响应并行产生多个工具调用。 |
+| `tool_choice` | `ToolChoice` | 未传入 | 工具选择策略，可使用 `auto`、`none`、`required` 或指定函数。 |
+| `store` | `bool` | 未传入 | OpenAI 兼容的响应存储参数。当前版本构造函数接受该参数，但不会自动转发到请求。 |
+| `metadata` | `dict[str, str]` | 未传入 | 附加到请求中的元数据。 |
+| `timeout` | `httpx.Timeout \| None` | 连接 15 秒、读取/写入/连接池各 5 秒 | HTTP 客户端超时配置。 |
+
+当前版本会自动转发 `user`、`metadata`、`parallel_tool_calls` 和 `tool_choice`；如果业务依赖
+`temperature` 或 `store`，请先确认适配器版本是否已支持对应请求字段。
 
 ### Realtime
 

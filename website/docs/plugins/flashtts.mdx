@@ -68,18 +68,20 @@ tts = flashtts.TTS(
 
 ## 主要参数 {id="parameters"}
 
-| 参数 | 类型 / 可选值 | 默认值 |
-| --- | --- | --- |
-| `base_url` | URL | `FLASHTTS_BASE_URL` 或 `http://localhost:8000` |
-| `api_key` | 字符串或 `None` | `FLASHTTS_API_KEY` |
-| `sample_rate` | 整数 | `16000` |
-| `voice` | 服务端音色名 | `female` |
-| `pitch` | `very_low` / `low` / `moderate` / `high` / `very_high` | `None` |
-| `speed` | 同上 | `None` |
-| `temperature` | 浮点数 | `0.9` |
-| `top_k` | 整数 | `50` |
-| `top_p` | 浮点数 | `0.95` |
-| `repetition_penalty` | 浮点数 | `1.0` |
+| 参数 | 类型 / 可选值 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `base_url` | URL | `FLASHTTS_BASE_URL` 或 `http://localhost:8000` | FlashTTS 服务地址。插件会向该地址的 `/speak` 路径发起请求。 |
+| `api_key` | 字符串或 `None` | `FLASHTTS_API_KEY` | Bearer Token。服务端启用鉴权时必须配置。 |
+| `sample_rate` | 整数 | `16000` | 输出采样率，单位为 Hz。应与服务端返回音频的实际采样率一致。 |
+| `voice` | 服务端音色名 | `female` | 音色名称。可用值由服务端加载的模型决定。 |
+| `pitch` | `very_low` / `low` / `moderate` / `high` / `very_high` | `None` | 音高档位。`None` 表示使用服务端默认值。 |
+| `speed` | 同上 | `None` | 语速档位。`None` 表示使用服务端默认值。 |
+| `temperature` | 浮点数 | `0.9` | 控制合成采样随机性，值越高通常越有变化。 |
+| `top_k` | 整数 | `50` | 从概率最高的候选 token 中选取前 `k` 个参与采样。 |
+| `top_p` | 浮点数 | `0.95` | 累积概率采样阈值，用于限制候选 token 范围。 |
+| `repetition_penalty` | 浮点数 | `1.0` | 重复惩罚系数。调高可减少重复词句，过高可能影响自然度。 |
+| `max_tokens` | 整数 | `32768` | 单次合成允许生成的最大 token 数。 |
+| `extra_headers` | `dict[str, str]` | `{}` | 发送给 FlashTTS 服务的额外 HTTP Header。 |
 
 `voice` 的实际可选值由服务端加载的模型与配置决定，插件本身不维护统一音色列表。
 
