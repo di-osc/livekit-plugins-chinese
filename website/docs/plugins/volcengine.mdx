@@ -18,6 +18,7 @@ menu:
 - TTS：豆包语音合成，支持 Seed TTS 1.0、2.0 及对应声音复刻资源。
 - LLM：火山方舟文本模型，默认模型为 `doubao-seed-2-0-lite-260215`。
 - Realtime：豆包端到端实时语音，支持 `O` 和 `SC` 两类模型。
+  当前接入豆包实时语音模型 3.0（Seeduplex）全双工 Realtime 协议。
 
 ## 安装与开通 {id="setup"}
 
@@ -40,6 +41,8 @@ VOLCENGINE_TTS_ACCESS_TOKEN=your-tts-token
 VOLCENGINE_LLM_API_KEY=your-ark-api-key
 VOLCENGINE_REALTIME_APP_ID=your-realtime-app-id
 VOLCENGINE_REALTIME_ACCESS_TOKEN=your-realtime-token
+# 新版控制台 API Key（推荐；与上面旧版控制台鉴权二选一）
+VOLCENGINE_REALTIME_API_KEY=your-api-key
 ```
 
 ## STT + LLM + TTS {id="pipeline"}
@@ -73,6 +76,7 @@ session = AgentSession(
 ```python
 session = AgentSession(
     llm=volcengine.RealtimeModel(
+        api_key="your-api-key",  # 新版控制台；旧版可使用 app_id/access_token
         bot_name="豆包",
         model="O",
         speaker="zh_female_vv_jupiter_bigtts",
@@ -83,7 +87,16 @@ session = AgentSession(
 ```
 
 `app_id` 与 `access_token` 未传时分别读取 `VOLCENGINE_REALTIME_APP_ID` 和
-`VOLCENGINE_REALTIME_ACCESS_TOKEN`。
+`VOLCENGINE_REALTIME_ACCESS_TOKEN`；新版控制台可直接传入 `api_key` 或设置
+`VOLCENGINE_REALTIME_API_KEY`。插件使用全双工地址
+`wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue`，输入音频为
+16 kHz PCM，输出音频为 24 kHz `pcm_s16le`。
+
+每轮 `response.done` 会产生 LiveKit `RealtimeModelMetrics`，并记录输入/输出的文本、
+音频及缓存 Token。插件同时按中国区后付费公开目录价估算单轮和会话累计费用：输入文本
+10 元/百万 Token、输入音频 80 元/百万 Token、缓存输入 5 元/百万 Token、输出文本
+80 元/百万 Token、输出音频 300 元/百万 Token。日志中的估算不包含免费额度、折扣或
+商务协议价，最终费用以火山引擎账单为准。
 
 ## O 与 SC {id="models"}
 

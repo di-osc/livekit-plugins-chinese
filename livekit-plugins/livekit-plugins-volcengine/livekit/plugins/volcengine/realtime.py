@@ -9,14 +9,17 @@ import time
 import weakref
 import gzip
 import uuid
+import base64
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
-from typing import Literal, Callable
+from typing import Any, Literal, Callable
 
 import aiohttp
 import numpy as np
 from livekit import rtc
 from livekit.agents import llm, utils
+from livekit.agents.metrics import RealtimeModelMetrics
+from livekit.agents.metrics.base import Metadata
 from livekit.agents.types import (
     DEFAULT_API_CONNECT_OPTIONS,
     NOT_GIVEN,
@@ -25,6 +28,90 @@ from livekit.agents.types import (
 )
 
 from .log import logger
+
+
+_TOKENS_PER_MILLION = 1_000_000
+_INPUT_TEXT_PRICE_CNY = 10.0
+_INPUT_AUDIO_PRICE_CNY = 80.0
+_CACHED_INPUT_PRICE_CNY = 5.0
+_OUTPUT_TEXT_PRICE_CNY = 80.0
+_OUTPUT_AUDIO_PRICE_CNY = 300.0
+
+
+@dataclass(frozen=True)
+class RealtimeUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    input_text_tokens: int = 0
+    input_audio_tokens: int = 0
+    cached_input_text_tokens: int = 0
+    cached_input_audio_tokens: int = 0
+    output_text_tokens: int = 0
+    output_audio_tokens: int = 0
+
+
+def _token_count(data: dict[str, Any], *names: str) -> int:
+    for name in names:
+        value = data.get(name)
+        if value is not None:
+            return int(value or 0)
+    return 0
+
+
+def _parse_realtime_usage(data: dict[str, Any]) -> RealtimeUsage:
+    input_details = (
+        data.get("input_tokens_details") or data.get("input_token_details") or {}
+    )
+    output_details = (
+        data.get("output_tokens_details") or data.get("output_token_details") or {}
+    )
+    cached_details = (
+        input_details.get("cached_tokens_details")
+        or input_details.get("cached_token_details")
+        or data.get("cached_tokens_details")
+        or {}
+    )
+    cached_text = _token_count(
+        cached_details, "text_tokens", "cached_text_tokens"
+    ) or _token_count(input_details, "cached_text_tokens")
+    cached_audio = _token_count(
+        cached_details, "audio_tokens", "cached_audio_tokens"
+    ) or _token_count(input_details, "cached_audio_tokens")
+    input_text = _token_count(input_details, "text_tokens", "input_text_tokens")
+    input_audio = _token_count(input_details, "audio_tokens", "input_audio_tokens")
+    output_text = _token_count(output_details, "text_tokens", "output_text_tokens")
+    output_audio = _token_count(output_details, "audio_tokens", "output_audio_tokens")
+    input_tokens = _token_count(data, "input_tokens") or input_text + input_audio
+    output_tokens = _token_count(data, "output_tokens") or output_text + output_audio
+    return RealtimeUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=_token_count(data, "total_tokens") or input_tokens + output_tokens,
+        input_text_tokens=input_text,
+        input_audio_tokens=input_audio,
+        cached_input_text_tokens=cached_text,
+        cached_input_audio_tokens=cached_audio,
+        output_text_tokens=output_text,
+        output_audio_tokens=output_audio,
+    )
+
+
+def _estimate_realtime_cost_cny(usage: RealtimeUsage) -> float:
+    uncached_text = max(0, usage.input_text_tokens - usage.cached_input_text_tokens)
+    uncached_audio = max(0, usage.input_audio_tokens - usage.cached_input_audio_tokens)
+    return (
+        uncached_text * _INPUT_TEXT_PRICE_CNY
+        + uncached_audio * _INPUT_AUDIO_PRICE_CNY
+        + usage.cached_input_text_tokens * _CACHED_INPUT_PRICE_CNY
+        + usage.cached_input_audio_tokens * _CACHED_INPUT_PRICE_CNY
+        + usage.output_text_tokens * _OUTPUT_TEXT_PRICE_CNY
+        + usage.output_audio_tokens * _OUTPUT_AUDIO_PRICE_CNY
+    ) / _TOKENS_PER_MILLION
+
+
+def _completed_transcript(event: dict[str, Any], accumulated: str = "") -> str:
+    return str(event.get("transcript") or event.get("text") or accumulated)
 
 
 PROTOCOL_VERSION = 0b0001
@@ -163,19 +250,20 @@ def parse_response(res):
 
 @dataclass
 class _RealtimeOptions:
-    app_id: str
-    access_token: str
+    app_id: str | None
+    access_token: str | None
     bot_name: str
     system_role: str
     max_session_duration: float | None
     conn_options: APIConnectOptions
     modalities: list[Literal["text", "audio"]]
+    api_key: str | None = None
     opening: str = "你好啊，今天过得怎么样？"
     speaking_style: str = "你的说话风格简洁明了，语速适中，语调自然。"
     speaker: str = "zh_female_vv_jupiter_bigtts"
     sample_rate: int = 24000
     num_channels: int = 1
-    format: str = "pcm"
+    format: str = "pcm_s16le"
     model: Literal["O", "SC"] = "O"
     character_manifest: str | None = None
     end_smooth_window_ms: int = 500
@@ -186,20 +274,27 @@ class _RealtimeOptions:
 
     @property
     def ws_url(self) -> str:
-        return "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
+        return "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
 
     def get_ws_headers(self) -> dict:
+        if self.api_key:
+            return {"X-Api-Key": self.api_key}
+        if not self.app_id or not self.access_token:
+            raise ValueError(
+                "VOLCENGINE_REALTIME_API_KEY or app_id/access_token is required"
+            )
         headers = {
-            "X-Api-App-ID": self.app_id,
+            "X-Api-App-Id": self.app_id,
             "X-Api-Access-Key": self.access_token,
-            "X-Api-Resource-Id": "volc.speech.dialog",  # 固定值
-            "X-Api-App-Key": "PlgvMymc7f3tQnJ6",  # 固定值
+            "X-Api-Resource-Id": "volc.speech.dialog",
+            "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
             "X-Api-Connect-Id": str(uuid.uuid4()),
         }
+        headers["X-Api-Request-Id"] = headers["X-Api-Connect-Id"]
         return headers
 
     def get_start_session_reqs(self, dialog_id: str | None) -> dict:
-        start_session_req = {
+        return {
             "asr": {
                 "extra": {
                     "end_smooth_window_ms": self.end_smooth_window_ms,
@@ -225,11 +320,9 @@ class _RealtimeOptions:
                     "volc_websearch_type": self.volc_websearch_type,
                     "volc_websearch_api_key": self.volc_websearch_api_key,
                     "volc_websearch_no_result_message": self.volc_websearch_no_result_message,
-                    "model": self.model,
                 },
             },
         }
-        return start_session_req
 
 
 @dataclass
@@ -264,6 +357,7 @@ class RealtimeModel(llm.RealtimeModel):
         opening: str | None = None,
         app_id: str | None = None,
         access_token: str | None = None,
+        api_key: str | None = None,
         system_role: str | None = None,
         character_manifest: str = None,
         model: Literal["O", "SC"] = "O",
@@ -299,19 +393,22 @@ class RealtimeModel(llm.RealtimeModel):
         logger.info(
             f"Volc Websearch No Result Message: {volc_websearch_no_result_message}"
         )
+        api_key = api_key or os.environ.get("VOLCENGINE_REALTIME_API_KEY")
         app_id = app_id or os.environ.get("VOLCENGINE_REALTIME_APP_ID")
-        if app_id is None:
-            raise ValueError("VOLCENGINE_REALTIME_APP_ID is required")
         access_token = access_token or os.environ.get(
             "VOLCENGINE_REALTIME_ACCESS_TOKEN"
         )
-        if access_token is None:
-            raise ValueError("VOLCENGINE_REALTIME_ACCESS_TOKEN is required")
+        if api_key is None and (app_id is None or access_token is None):
+            raise ValueError(
+                "VOLCENGINE_REALTIME_API_KEY or VOLCENGINE_REALTIME_APP_ID/"
+                "VOLCENGINE_REALTIME_ACCESS_TOKEN is required"
+            )
         self._opts = _RealtimeOptions(
             app_id=app_id,
             access_token=access_token,
+            api_key=api_key,
             bot_name=bot_name,
-            system_role=system_role,
+            system_role=system_role or "",
             speaker=speaker,
             opening=opening,
             speaking_style=speaking_style,
@@ -335,7 +432,8 @@ class RealtimeModel(llm.RealtimeModel):
         *,
         max_session_duration: NotGivenOr[float | None] = NOT_GIVEN,
     ) -> None:
-        pass
+        if utils.is_given(max_session_duration):
+            self._opts.max_session_duration = max_session_duration
 
     def _ensure_http_session(self) -> aiohttp.ClientSession:
         if not self._http_session:
@@ -384,7 +482,7 @@ class RealtimeSession(
         self._opts = replace(realtime_model._opts)
         self._turn_detection_disabled = turn_detection_disabled
         self._tools = llm.ToolContext.empty()
-        self._msg_ch = utils.aio.Chan[rtc.AudioFrame]()
+        self._msg_ch = utils.aio.Chan[rtc.AudioFrame | dict]()
         self._input_resampler: rtc.AudioResampler | None = None
         self.session_id = str(uuid.uuid4())
 
@@ -400,8 +498,10 @@ class RealtimeSession(
         self._item_create_future: dict[str, asyncio.Future] = {}
 
         self._current_generation: _ResponseGeneration | None = None
+        self._current_generation_event: llm.GenerationCreatedEvent | None = None
         self._current_item: _MessageGeneration | None = None
         self._remote_chat_ctx = llm.remote_chat_context.RemoteChatContext()
+        self._chat_ctx = llm.ChatContext.empty()
         self._is_opening = False
         self._first_tts_response = True
         self._first_llm_response = True
@@ -410,17 +510,34 @@ class RealtimeSession(
         self._update_chat_ctx_lock = asyncio.Lock()
         self._update_fnc_ctx_lock = asyncio.Lock()
 
-        # 100ms chunks
+        # The duplex protocol recommends 20 ms packets (640 bytes at 16 kHz).
         self._bstream = utils.audio.AudioByteStream(
-            self._realtime_model._opts.sample_rate,
+            16000,
             self._realtime_model._opts.num_channels,
-            samples_per_channel=self._realtime_model._opts.sample_rate // 10,
+            samples_per_channel=16000 // 50,
         )
         self._pushed_duration_s: float = (
             0  # duration of audio pushed to the OpenAI Realtime API
         )
+        self._audio_muted = False
+        self._input_transcripts: dict[str, str] = {}
+        self._sent_user_item_ids: set[str] = set()
+        self._usage = RealtimeUsage()
+        self._estimated_cost_cny = 0.0
 
-    def send_event(self, event: rtc.AudioFrame) -> None:
+    def send_event(self, event: rtc.AudioFrame | dict) -> None:
+        with contextlib.suppress(utils.aio.channel.ChanClosed):
+            self._msg_ch.send_nowait(event)
+
+    @property
+    def usage(self) -> RealtimeUsage:
+        return self._usage
+
+    @property
+    def estimated_cost_cny(self) -> float:
+        return self._estimated_cost_cny
+
+    def _send_json_event(self, event: dict) -> None:
         with contextlib.suppress(utils.aio.channel.ChanClosed):
             self._msg_ch.send_nowait(event)
 
@@ -443,15 +560,23 @@ class RealtimeSession(
     async def _create_ws_conn(self) -> aiohttp.ClientWebSocketResponse:
         headers = self._realtime_model._opts.get_ws_headers()
         url = self._realtime_model._opts.ws_url
-        return await asyncio.wait_for(
-            self._realtime_model._ensure_http_session().ws_connect(
-                url=url,
-                headers=headers,
-            ),
-            self._realtime_model._opts.conn_options.timeout,
-        )
+        try:
+            return await asyncio.wait_for(
+                self._realtime_model._ensure_http_session().ws_connect(
+                    url=url,
+                    headers=headers,
+                ),
+                self._realtime_model._opts.conn_options.timeout,
+            )
+        except aiohttp.WSServerHandshakeError as exc:
+            if exc.status == 403:
+                raise RuntimeError(
+                    "火山引擎 Realtime 握手被拒绝（403）。请在豆包语音控制台开通"
+                    "端到端实时语音资源，或改用已授权的 VOLCENGINE_REALTIME_API_KEY。"
+                ) from exc
+            raise
 
-    async def _run_ws(self, ws_conn: aiohttp.ClientWebSocketResponse) -> None:
+    async def _run_ws_legacy(self, ws_conn: aiohttp.ClientWebSocketResponse) -> None:
         closing = False
         logger.info("start connection")
         start_connection_request = bytearray(generate_header())
@@ -718,6 +843,278 @@ class RealtimeSession(
             await utils.aio.cancel_and_wait(*tasks)
             await ws_conn.close()
 
+    async def _run_ws(self, ws_conn: aiohttp.ClientWebSocketResponse) -> None:
+        async def send(event: dict) -> None:
+            await ws_conn.send_str(
+                json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+            )
+
+        opts = self._realtime_model._opts
+        await send(
+            {
+                "type": "session.create",
+                "event_id": utils.shortuuid("event_"),
+                "session": {
+                    "id": self.session_id,
+                    "model": "1.2.6.1",
+                    "instructions": opts.system_role or "",
+                    "audio": {
+                        "input": {"format": {"type": "pcm", "rate": 16000}},
+                        "output": {
+                            "format": {"type": opts.format, "rate": 24000},
+                            "voice": opts.speaker,
+                        },
+                    },
+                },
+                "extension": opts.get_start_session_reqs(self.session_id),
+            }
+        )
+        while True:
+            msg = await ws_conn.receive()
+            if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                continue
+            event = json.loads(
+                msg.data.decode() if isinstance(msg.data, bytes) else msg.data
+            )
+            if event.get("type") == "session.created":
+                self.session_id = event.get("session", {}).get("id", self.session_id)
+                break
+            if event.get("type") == "error":
+                raise RuntimeError(event)
+
+        if opts.opening:
+            self._ensure_generation()
+            await send(
+                {
+                    "type": "speech_text_buffer.commit",
+                    "event_id": utils.shortuuid("event_"),
+                    "text": opts.opening,
+                }
+            )
+
+        async def recv_task() -> None:
+            async for msg in ws_conn:
+                if msg.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                    continue
+                event = json.loads(
+                    msg.data.decode() if isinstance(msg.data, bytes) else msg.data
+                )
+                kind = event.get("type", "")
+                if kind == "error":
+                    raise RuntimeError(event)
+                if kind == "conversation.item.input_audio_transcription.started":
+                    item_id = str(event.get("item_id") or utils.shortuuid("item_"))
+                    self._input_transcripts[item_id] = ""
+                    self.emit("input_speech_started", llm.InputSpeechStartedEvent())
+                elif kind == "conversation.item.input_audio_transcription.delta":
+                    item_id = str(event.get("item_id") or "")
+                    if item_id:
+                        self._input_transcripts[item_id] = self._input_transcripts.get(
+                            item_id, ""
+                        ) + str(event.get("delta") or "")
+                elif kind == "conversation.item.input_audio_transcription.completed":
+                    item_id = str(event.get("item_id") or utils.shortuuid("item_"))
+                    transcript = _completed_transcript(
+                        event,
+                        self._input_transcripts.get(item_id, ""),
+                    )
+                    self._input_transcripts.pop(item_id, None)
+                    logger.debug(
+                        "Volcengine Realtime transcription completed",
+                        extra={"item_id": item_id, "transcript": transcript},
+                    )
+                    self.emit(
+                        "input_audio_transcription_completed",
+                        llm.InputTranscriptionCompleted(
+                            item_id=item_id,
+                            transcript=transcript,
+                            is_final=True,
+                        ),
+                    )
+                    self.emit(
+                        "input_speech_stopped",
+                        llm.InputSpeechStoppedEvent(user_transcription_enabled=False),
+                    )
+                elif kind == "response.output_text.delta":
+                    self._ensure_generation()
+                    if self._current_generation._first_token_timestamp is None:
+                        self._current_generation._first_token_timestamp = time.time()
+                    self._current_item.text_ch.send_nowait(event.get("delta", ""))
+                elif kind == "response.output_text.done" and self._current_item:
+                    self._current_item.text_ch.close()
+                elif kind == "response.output_audio.delta":
+                    self._ensure_generation()
+                    if self._current_generation._first_token_timestamp is None:
+                        self._current_generation._first_token_timestamp = time.time()
+                    data = base64.b64decode(event.get("delta", ""))
+                    self._current_item.audio_ch.send_nowait(
+                        rtc.AudioFrame(
+                            data=data,
+                            sample_rate=24000,
+                            num_channels=1,
+                            samples_per_channel=len(data) // 2,
+                        )
+                    )
+                elif kind == "response.function_call_arguments.done":
+                    self._ensure_generation()
+                    for item in event.get("items", []):
+                        self._current_generation.function_ch.send_nowait(
+                            llm.FunctionCall(
+                                call_id=str(item.get("call_id", "")),
+                                name=str(item.get("name", "")),
+                                arguments=str(item.get("arguments", "")),
+                            )
+                        )
+                elif kind == "response.output_audio.done":
+                    if self._current_item:
+                        # Some 3.0 responses do not emit
+                        # response.output_text.done. Audio is the authoritative
+                        # end-of-turn signal, so close both streams here.
+                        self._current_item.text_ch.close()
+                        self._current_item.audio_ch.close()
+                    if self._current_generation:
+                        self._current_generation.message_ch.close()
+                        self._current_generation.function_ch.close()
+                        self._current_generation = None
+                        self._current_generation_event = None
+                        self._current_item = None
+                elif kind == "response.done":
+                    self._handle_response_done(event)
+
+        async def send_task() -> None:
+            async for item in self._msg_ch:
+                if isinstance(item, rtc.AudioFrame):
+                    await send(
+                        {
+                            "type": "input_audio_buffer.append",
+                            "audio": base64.b64encode(item.data.tobytes()).decode(
+                                "ascii"
+                            ),
+                        }
+                    )
+                else:
+                    await send(item)
+
+        tasks = [asyncio.create_task(recv_task()), asyncio.create_task(send_task())]
+        try:
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        finally:
+            await utils.aio.cancel_and_wait(*tasks)
+            await ws_conn.close()
+
+    def _ensure_generation(self) -> llm.GenerationCreatedEvent:
+        if self._current_generation is not None:
+            assert self._current_generation_event is not None
+            return self._current_generation_event
+        generation = _ResponseGeneration(
+            utils.aio.Chan(), utils.aio.Chan(), {}, asyncio.Future(), time.time()
+        )
+        self._current_generation = generation
+        generation_event = llm.GenerationCreatedEvent(
+            message_stream=generation.message_ch,
+            function_stream=generation.function_ch,
+            user_initiated=False,
+        )
+        self._current_generation_event = generation_event
+        self.emit("generation_created", generation_event)
+        modalities = asyncio.Future[list[Literal["text", "audio"]]]()
+        self._current_item = _MessageGeneration(
+            utils.shortuuid(), utils.aio.Chan(), utils.aio.Chan(), modalities=modalities
+        )
+        if self._realtime_model.capabilities.audio_output:
+            modalities.set_result(["audio", "text"])
+        else:
+            self._current_item.audio_ch.close()
+            modalities.set_result(["text"])
+        generation.message_ch.send_nowait(
+            llm.MessageGeneration(
+                message_id=self._current_item.message_id,
+                text_stream=self._current_item.text_ch,
+                audio_stream=self._current_item.audio_ch,
+                modalities=modalities,
+            )
+        )
+        return generation_event
+
+    def _handle_response_done(self, event: dict[str, Any]) -> None:
+        response = event.get("response") or event
+        usage = _parse_realtime_usage(response.get("usage") or event.get("usage") or {})
+        response_id = str(
+            response.get("id")
+            or event.get("response_id")
+            or utils.shortuuid("response_")
+        )
+        generation = self._current_generation
+        created = generation._created_timestamp if generation else time.time()
+        duration = max(time.time() - created, 1e-6)
+        response_cost = _estimate_realtime_cost_cny(usage)
+        self._usage = RealtimeUsage(
+            **{
+                field: getattr(self._usage, field) + getattr(usage, field)
+                for field in RealtimeUsage.__dataclass_fields__
+            }
+        )
+        self._estimated_cost_cny += response_cost
+        logger.info(
+            "Volcengine Realtime usage cost",
+            extra={
+                "response_id": response_id,
+                **usage.__dict__,
+                "estimated_response_cost_cny": round(response_cost, 6),
+                "estimated_session_cost_cny": round(self._estimated_cost_cny, 6),
+                "pricing_basis": (
+                    "Volcengine China public pay-as-you-go list price; free quota, "
+                    "discounts and negotiated pricing excluded"
+                ),
+            },
+        )
+        self.emit(
+            "metrics_collected",
+            RealtimeModelMetrics(
+                request_id=response_id,
+                timestamp=created,
+                duration=duration,
+                ttft=(
+                    generation._first_token_timestamp - created
+                    if generation and generation._first_token_timestamp is not None
+                    else -1
+                ),
+                cancelled=False,
+                label=self._realtime_model.label,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                total_tokens=usage.total_tokens,
+                tokens_per_second=usage.output_tokens / duration,
+                input_token_details=RealtimeModelMetrics.InputTokenDetails(
+                    text_tokens=usage.input_text_tokens,
+                    audio_tokens=usage.input_audio_tokens,
+                    image_tokens=0,
+                ),
+                output_token_details=RealtimeModelMetrics.OutputTokenDetails(
+                    text_tokens=usage.output_text_tokens,
+                    audio_tokens=usage.output_audio_tokens,
+                    image_tokens=0,
+                ),
+                metadata=Metadata(
+                    model_name="1.2.6.1",
+                    model_provider=self._realtime_model.provider,
+                ),
+            ),
+        )
+        if self._current_item:
+            with contextlib.suppress(Exception):
+                self._current_item.text_ch.close()
+            with contextlib.suppress(Exception):
+                self._current_item.audio_ch.close()
+        if generation:
+            generation.message_ch.close()
+            generation.function_ch.close()
+        self._current_item = None
+        self._current_generation = None
+        self._current_generation_event = None
+
     def _create_session_update_event(self):
         pass
 
@@ -800,13 +1197,55 @@ class RealtimeSession(
         tool_choice: NotGivenOr[llm.ToolChoice | None] = NOT_GIVEN,
         voice: NotGivenOr[str] = NOT_GIVEN,
     ) -> None:
-        pass
+        if utils.is_given(voice):
+            self._opts.speaker = voice
+            self._send_json_event(
+                {
+                    "type": "session.update",
+                    "event_id": utils.shortuuid("event_"),
+                    "session": {"audio": {"output": {"voice": voice}}},
+                }
+            )
 
     async def update_tools(self, tools: list[llm.Tool]) -> None:
-        pass
+        self._tools = llm.ToolContext(tools)
+        self._send_json_event(
+            {
+                "type": "session.update",
+                "event_id": utils.shortuuid("event_"),
+                "session": {"tools": self._tools.parse_function_tools("openai")},
+            }
+        )
 
     async def update_chat_ctx(self, chat_ctx: llm.ChatContext) -> None:
-        pass
+        self._chat_ctx = chat_ctx.copy()
+        self._remote_chat_ctx = llm.remote_chat_context.RemoteChatContext()
+        items = []
+        for item in chat_ctx.items:
+            if item.type != "message":
+                continue
+            role = item.role
+            text = " ".join(part for part in item.content if isinstance(part, str))
+            if text:
+                item_id = str(item.id or utils.shortuuid("item_"))
+                items.append(
+                    {
+                        "id": item_id,
+                        "type": "message",
+                        "role": role,
+                        "content": [{"type": "input_text", "text": text}],
+                    }
+                )
+                if role == "user":
+                    self._sent_user_item_ids.add(item_id)
+        if items:
+            self._send_json_event(
+                {
+                    "type": "conversation.item.create",
+                    "event_id": utils.shortuuid("event_"),
+                    "items": items,
+                }
+            )
 
     def _create_update_chat_ctx_events(self, chat_ctx: llm.ChatContext):
         events = []
@@ -815,8 +1254,23 @@ class RealtimeSession(
 
     async def update_instructions(self, instructions: str) -> None:
         self._opts.system_role = instructions
+        self._send_json_event(
+            {
+                "type": "session.update",
+                "event_id": utils.shortuuid("event_"),
+                "session": {"instructions": instructions},
+            }
+        )
 
     def push_audio(self, frame: rtc.AudioFrame) -> None:
+        if self._audio_muted:
+            self._audio_muted = False
+            self._send_json_event(
+                {
+                    "type": "input_audio_unmute.commit",
+                    "event_id": utils.shortuuid("event_"),
+                }
+            )
         for f in self._resample_audio(frame):
             data = f.data.tobytes()
             for nf in self._bstream.write(data):
@@ -829,9 +1283,23 @@ class RealtimeSession(
     def commit_audio(self) -> None:
         if self._pushed_duration_s > 0.1:
             self._pushed_duration_s = 0
+            self._send_json_event(
+                {
+                    "type": "input_audio_buffer.commit",
+                    "event_id": utils.shortuuid("event_"),
+                }
+            )
 
     def clear_audio(self) -> None:
         self._pushed_duration_s = 0
+        if not self._audio_muted:
+            self._audio_muted = True
+            self._send_json_event(
+                {
+                    "type": "input_audio_mute.commit",
+                    "event_id": utils.shortuuid("event_"),
+                }
+            )
 
     def generate_reply(
         self,
@@ -840,21 +1308,54 @@ class RealtimeSession(
         tool_choice: NotGivenOr[llm.ToolChoice] = NOT_GIVEN,
         tools: NotGivenOr[list[llm.Tool]] = NOT_GIVEN,
     ) -> asyncio.Future[llm.GenerationCreatedEvent]:
-        """仅文字输入"""
-        event_id = utils.shortuuid("response_create_")
-        fut = asyncio.Future[llm.GenerationCreatedEvent]()
-        self._response_created_futures[event_id] = fut
-
-        def _on_timeout() -> None:
-            if fut and not fut.done():
-                fut.set_exception(llm.RealtimeError("generate_reply timed out."))
-
-        handle = asyncio.get_event_loop().call_later(5.0, _on_timeout)
-        fut.add_done_callback(lambda _: handle.cancel())
-        return fut
+        """使用 3.0 Realtime 文本事件请求一轮回复。"""
+        future = asyncio.get_running_loop().create_future()
+        if utils.is_given(tools):
+            self._tools = llm.ToolContext(tools)
+            self._send_json_event(
+                {
+                    "type": "session.update",
+                    "event_id": utils.shortuuid("event_"),
+                    "session": {"tools": self._tools.parse_function_tools("openai")},
+                }
+            )
+        text = instructions
+        user_item_id: str | None = None
+        if not utils.is_given(text):
+            for item in reversed(self._chat_ctx.items):
+                if item.type == "message" and item.role == "user" and item.text_content:
+                    item_id = str(item.id or "")
+                    if item_id and item_id in self._sent_user_item_ids:
+                        continue
+                    text = item.text_content
+                    user_item_id = item_id or None
+                    break
+        if utils.is_given(text) and text:
+            user_item_id = user_item_id or utils.shortuuid("item_")
+            # speech_text_buffer.commit is a direct-TTS event; input_text must
+            # be inserted as a user conversation item so the model answers it.
+            self._send_json_event(
+                {
+                    "type": "conversation.item.create",
+                    "event_id": utils.shortuuid("event_"),
+                    "items": [
+                        {
+                            "id": user_item_id,
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": text}],
+                        }
+                    ],
+                }
+            )
+            self._sent_user_item_ids.add(user_item_id)
+        future.set_result(self._ensure_generation())
+        return future
 
     def interrupt(self) -> None:
-        pass
+        self._send_json_event(
+            {"type": "response.cancel", "event_id": utils.shortuuid("event_")}
+        )
 
     def truncate(
         self,
@@ -881,6 +1382,9 @@ class RealtimeSession(
                     self.send_event(ev)
 
     async def aclose(self) -> None:
+        self._send_json_event(
+            {"type": "session.close", "event_id": utils.shortuuid("event_")}
+        )
         self._msg_ch.close()
         await self._main_atask
 
@@ -891,12 +1395,12 @@ class RealtimeSession(
                 self._input_resampler = None
 
         if self._input_resampler is None and (
-            frame.sample_rate != self._realtime_model._opts.sample_rate
+            frame.sample_rate != 16000
             or frame.num_channels != self._realtime_model._opts.num_channels
         ):
             self._input_resampler = rtc.AudioResampler(
                 input_rate=frame.sample_rate,
-                output_rate=self._realtime_model._opts.sample_rate,
+                output_rate=16000,
                 num_channels=self._realtime_model._opts.num_channels,
             )
 
