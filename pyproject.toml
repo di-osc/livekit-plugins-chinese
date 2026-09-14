@@ -5,7 +5,7 @@ requires-python = ">=3.10"
 
 [tool.uv]
 constraint-dependencies = [
-    "livekit-agents==1.6.10",
+    "livekit-agents==1.8.1",
 ]
 
 [tool.uv.sources]

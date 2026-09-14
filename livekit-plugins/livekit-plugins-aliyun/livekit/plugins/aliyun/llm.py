@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
-import time
 
 import httpx
 import openai
+from openai.resources.chat import AsyncChat as _AsyncChat
 from openai.types.chat import ChatCompletionChunk, ChatCompletionToolChoiceOptionParam
 from openai.types.chat.chat_completion_chunk import Choice
 
@@ -88,6 +89,12 @@ class LLM(llm.LLM):
                 ),
             ),
         )
+        # openai.AsyncClient.chat is a cached_property that imports
+        # openai.resources.chat (and the beta realtime type tree) on first
+        # access. Force that import here so the first chat() call does not
+        # block the LiveKit event loop.
+        _chat: _AsyncChat = self._client.chat
+        assert _chat is self._client.chat
 
     def chat(
         self,
