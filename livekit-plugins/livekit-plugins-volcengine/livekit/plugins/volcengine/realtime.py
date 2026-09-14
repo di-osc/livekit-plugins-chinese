@@ -38,6 +38,13 @@ _OUTPUT_TEXT_PRICE_CNY = 80.0
 _OUTPUT_AUDIO_PRICE_CNY = 300.0
 
 
+def _clean_secret(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 @dataclass(frozen=True)
 class RealtimeUsage:
     input_tokens: int = 0
@@ -277,20 +284,26 @@ class _RealtimeOptions:
         return "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
 
     def get_ws_headers(self) -> dict:
+        connect_id = str(uuid.uuid4())
+        headers = {
+            "X-Api-Resource-Id": "volc.speech.dialog",
+            "X-Api-Connect-Id": connect_id,
+            "X-Api-Request-Id": connect_id,
+        }
         if self.api_key:
-            return {"X-Api-Key": self.api_key}
+            headers["X-Api-Key"] = self.api_key.strip()
+            return headers
         if not self.app_id or not self.access_token:
             raise ValueError(
                 "VOLCENGINE_REALTIME_API_KEY or app_id/access_token is required"
             )
-        headers = {
-            "X-Api-App-Id": self.app_id,
-            "X-Api-Access-Key": self.access_token,
-            "X-Api-Resource-Id": "volc.speech.dialog",
-            "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
-            "X-Api-Connect-Id": str(uuid.uuid4()),
-        }
-        headers["X-Api-Request-Id"] = headers["X-Api-Connect-Id"]
+        headers.update(
+            {
+                "X-Api-App-Id": self.app_id,
+                "X-Api-Access-Key": self.access_token,
+                "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
+            }
+        )
         return headers
 
     def get_start_session_reqs(self, dialog_id: str | None) -> dict:
@@ -393,10 +406,12 @@ class RealtimeModel(llm.RealtimeModel):
         logger.info(
             f"Volc Websearch No Result Message: {volc_websearch_no_result_message}"
         )
-        api_key = api_key or os.environ.get("VOLCENGINE_REALTIME_API_KEY")
-        app_id = app_id or os.environ.get("VOLCENGINE_REALTIME_APP_ID")
-        access_token = access_token or os.environ.get(
-            "VOLCENGINE_REALTIME_ACCESS_TOKEN"
+        api_key = _clean_secret(
+            api_key or os.environ.get("VOLCENGINE_REALTIME_API_KEY")
+        )
+        app_id = _clean_secret(app_id or os.environ.get("VOLCENGINE_REALTIME_APP_ID"))
+        access_token = _clean_secret(
+            access_token or os.environ.get("VOLCENGINE_REALTIME_ACCESS_TOKEN")
         )
         if api_key is None and (app_id is None or access_token is None):
             raise ValueError(
@@ -569,10 +584,12 @@ class RealtimeSession(
                 self._realtime_model._opts.conn_options.timeout,
             )
         except aiohttp.WSServerHandshakeError as exc:
-            if exc.status == 403:
+            if exc.status in (401, 403):
                 raise RuntimeError(
-                    "火山引擎 Realtime 握手被拒绝（403）。请在豆包语音控制台开通"
-                    "端到端实时语音资源，或改用已授权的 VOLCENGINE_REALTIME_API_KEY。"
+                    f"火山引擎 Realtime 握手失败（{exc.status}）。"
+                    "请确认 VOLCENGINE_REALTIME_API_KEY 来自豆包语音控制台新版 API Key，"
+                    "并已开通端到端实时语音（Seeduplex）资源；"
+                    "或改用 VOLCENGINE_REALTIME_APP_ID / VOLCENGINE_REALTIME_ACCESS_TOKEN。"
                 ) from exc
             raise
 

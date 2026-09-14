@@ -17,7 +17,19 @@ def test_volcengine_realtime_uses_duplex_v3_endpoint() -> None:
     assert model._opts.ws_url == (
         "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue"
     )
-    assert model._opts.get_ws_headers() == {"X-Api-Key": "api-key"}
+    headers = model._opts.get_ws_headers()
+    assert headers["X-Api-Key"] == "api-key"
+    assert headers["X-Api-Resource-Id"] == "volc.speech.dialog"
+    assert headers["X-Api-Connect-Id"]
+    assert headers["X-Api-Request-Id"] == headers["X-Api-Connect-Id"]
+    assert "X-Api-App-Id" not in headers
+
+
+def test_volcengine_realtime_strips_api_key_whitespace() -> None:
+    model = RealtimeModel(api_key="  api-key  \n")
+
+    assert model._opts.api_key == "api-key"
+    assert model._opts.get_ws_headers()["X-Api-Key"] == "api-key"
 
 
 def test_volcengine_realtime_legacy_auth_remains_supported() -> None:
