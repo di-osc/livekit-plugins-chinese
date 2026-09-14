@@ -1,24 +1,25 @@
 from __future__ import annotations
+
+import asyncio
+import json
 import os
 from dataclasses import dataclass
 from typing import List
-import json
 
-import asyncio
 import aiohttp
-
 from livekit import rtc
 from livekit.agents import (
+    APIConnectOptions,
+    APIStatusError,
+    DEFAULT_API_CONNECT_OPTIONS,
     stt,
     utils,
-    APIConnectOptions,
-    DEFAULT_API_CONNECT_OPTIONS,
-    APIStatusError,
 )
 from livekit.agents.types import (
     NOT_GIVEN,
     NotGivenOr,
 )
+
 from .log import logger
 
 
@@ -72,7 +73,7 @@ class STTOptions:
                 "function": "recognition",
                 "model": self.model,
                 "parameters": {
-                    "format": "wav",
+                    "format": "pcm",
                     "sample_rate": self.sample_rate,
                     "vocabulary_id": self.vocabulary_id,
                     "disfluency_removal_enabled": self.disfluency_removal_enabled,
@@ -186,7 +187,9 @@ class SpeechStream(stt.SpeechStream):
         conn_options: APIConnectOptions,
         http_session: aiohttp.ClientSession,
     ) -> None:
-        super().__init__(stt=stt, conn_options=conn_options)
+        super().__init__(
+            stt=stt, conn_options=conn_options, sample_rate=opts.sample_rate
+        )
 
         if opts.language is None:
             raise ValueError("language detection is not supported in streaming mode")
@@ -210,58 +213,91 @@ class SpeechStream(stt.SpeechStream):
 
     async def _run(self) -> None:
         closing_ws = False
-        task_id = utils.shortuuid()
-
-        @utils.log_exceptions(logger=logger)
-        async def send_task(ws: aiohttp.ClientWebSocketResponse):
-            nonlocal closing_ws
-            samples_100ms = self._opts.sample_rate // 10
-            audio_bstream = utils.audio.AudioByteStream(
-                sample_rate=self._opts.sample_rate,
-                num_channels=1,
-                samples_per_channel=samples_100ms,
-            )
-
-            has_ended = False
-            async for data in self._input_ch:
-                frames: list[rtc.AudioFrame] = []
-                if isinstance(data, rtc.AudioFrame):
-                    frames.extend(audio_bstream.write(data.data.tobytes()))
-                elif isinstance(data, self._FlushSentinel):
-                    frames.extend(audio_bstream.flush())
-                    has_ended = True
-
-                for frame in frames:
-                    await ws.send_bytes(frame.data.tobytes())
-
-                if has_ended:
-                    await ws.send_json(self._opts.get_finish_task_params(task_id))
-                    has_ended = False
-
-        @utils.log_exceptions(logger=logger)
-        async def recv_task(ws: aiohttp.ClientWebSocketResponse):
-            nonlocal closing_ws
-            while True:
-                msg = await ws.receive()
-                if msg.type in (
-                    aiohttp.WSMsgType.CLOSED,
-                    aiohttp.WSMsgType.CLOSE,
-                    aiohttp.WSMsgType.CLOSING,
-                ):
-                    if closing_ws:  # close is expected, see SpeechStream.aclose
-                        return
-
-                    # this will trigger a reconnection, see the _run loop
-                    raise APIStatusError(message="connection closed unexpectedly")
-
-                try:
-                    self._process_stream_event(json.loads(msg.data))
-                except Exception:
-                    logger.exception("failed to process message")
 
         ws: aiohttp.ClientWebSocketResponse | None = None
 
         while True:
+            task_id = utils.shortuuid()
+            started = asyncio.Event()
+
+            @utils.log_exceptions(logger=logger)
+            async def send_task(
+                ws: aiohttp.ClientWebSocketResponse,
+                *,
+                _task_id: str = task_id,
+                _started: asyncio.Event = started,
+            ):
+                nonlocal closing_ws
+                await _started.wait()
+                samples_100ms = self._opts.sample_rate // 10
+                audio_bstream = utils.audio.AudioByteStream(
+                    sample_rate=self._opts.sample_rate,
+                    num_channels=1,
+                    samples_per_channel=samples_100ms,
+                )
+
+                has_ended = False
+                async for data in self._input_ch:
+                    frames: list[rtc.AudioFrame] = []
+                    if isinstance(data, rtc.AudioFrame):
+                        frames.extend(audio_bstream.write(data.data.tobytes()))
+                    elif isinstance(data, self._FlushSentinel):
+                        frames.extend(audio_bstream.flush())
+                        has_ended = True
+
+                    for frame in frames:
+                        await ws.send_bytes(frame.data.tobytes())
+
+                    if has_ended:
+                        closing_ws = True
+                        await ws.send_json(self._opts.get_finish_task_params(_task_id))
+                        has_ended = False
+
+            @utils.log_exceptions(logger=logger)
+            async def recv_task(
+                ws: aiohttp.ClientWebSocketResponse,
+                *,
+                _started: asyncio.Event = started,
+            ):
+                nonlocal closing_ws
+                while True:
+                    msg = await ws.receive()
+                    if msg.type in (
+                        aiohttp.WSMsgType.CLOSED,
+                        aiohttp.WSMsgType.CLOSE,
+                        aiohttp.WSMsgType.CLOSING,
+                    ):
+                        if closing_ws:  # close is expected, see SpeechStream.aclose
+                            return
+
+                        # this will trigger a reconnection, see the _run loop
+                        raise APIStatusError(message="connection closed unexpectedly")
+                    if msg.type != aiohttp.WSMsgType.TEXT:
+                        continue
+
+                    try:
+                        data = json.loads(msg.data)
+                        event = data["header"]["event"]
+                    except Exception:
+                        logger.exception("failed to process message")
+                        continue
+
+                    if event == "task-started":
+                        _started.set()
+                    elif event == "task-failed":
+                        _started.set()
+                        raise APIStatusError(
+                            message=f"stt task failed: {data}",
+                            retryable=True,
+                        )
+                    elif event == "task-finished":
+                        return
+                    elif event == "result-generated":
+                        try:
+                            self._process_stream_event(data)
+                        except Exception:
+                            logger.exception("failed to process message")
+
             try:
                 ws = await self._connect_ws()
                 await ws.send_json(self._opts.get_run_task_params(task_id=task_id))

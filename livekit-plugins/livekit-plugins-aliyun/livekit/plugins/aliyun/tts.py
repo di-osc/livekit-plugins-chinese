@@ -1,12 +1,18 @@
-import os
-from dataclasses import dataclass
-from typing import Optional, Dict
-import time
-import aiohttp
 import asyncio
 import json
+import os
+import time
+from dataclasses import dataclass
+from typing import Optional
 
-from livekit.agents import tts, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS, utils
+import aiohttp
+from livekit.agents import (
+    DEFAULT_API_CONNECT_OPTIONS,
+    APIConnectOptions,
+    APIStatusError,
+    tts,
+    utils,
+)
 from osc_data.text_stream import TextStreamSentencizer
 
 from .log import logger
@@ -35,17 +41,17 @@ class TTSOptions:
     def get_ws_url(self) -> str:
         return "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 
-    def get_ws_header(self) -> Dict[str, str]:
+    def get_ws_header(self) -> dict[str, str]:
         return {
             "Authorization": f"bearer {self.api_key}",
             "X-DashScope-DataInspection": "enable",
         }
 
-    def get_run_task_params(self) -> Dict[str, str]:
+    def get_run_task_params(self, task_id: str) -> dict:
         params = {
             "header": {
                 "action": "run-task",
-                "task_id": utils.shortuuid(),
+                "task_id": task_id,
                 "streaming": "duplex",
             },
             "payload": {
@@ -67,11 +73,11 @@ class TTSOptions:
         }
         return params
 
-    def get_continue_task_params(self, text: str) -> Dict[str, str]:
+    def get_continue_task_params(self, text: str, task_id: str) -> dict:
         params = {
             "header": {
                 "action": "continue-task",
-                "task_id": utils.shortuuid(),
+                "task_id": task_id,
                 "streaming": "duplex",
             },
             "payload": {
@@ -82,11 +88,11 @@ class TTSOptions:
         }
         return params
 
-    def get_finish_task_params(self) -> Dict[str, str]:
+    def get_finish_task_params(self, task_id: str) -> dict:
         params = {
             "header": {
                 "action": "finish-task",
-                "task_id": utils.shortuuid(),
+                "task_id": task_id,
                 "streaming": "duplex",
             },
             "payload": {"input": {}},
@@ -182,6 +188,7 @@ class SynthesizeStream(tts.SynthesizeStream):
 
     async def _run(self, emitter: tts.AudioEmitter) -> None:
         request_id = utils.shortuuid()
+        task_id = utils.shortuuid()
         emitter.initialize(
             request_id=request_id,
             sample_rate=self._opts.sample_rate,
@@ -190,24 +197,53 @@ class SynthesizeStream(tts.SynthesizeStream):
             num_channels=1,
             frame_size_ms=200,
         )
+        started = asyncio.Event()
 
-        async def _send_task(sentence: str, ws: aiohttp.ClientWebSocketResponse):
-            run_task_params = self._opts.get_run_task_params()
-            await ws.send_json(run_task_params)
-            continue_task_params = self._opts.get_continue_task_params(text=sentence)
-            await ws.send_json(continue_task_params)
-            finish_task_params = self._opts.get_finish_task_params()
-            await ws.send_json(finish_task_params)
+        async def _send_task(ws: aiohttp.ClientWebSocketResponse):
+            await ws.send_json(self._opts.get_run_task_params(task_id=task_id))
+            await started.wait()
+
+            splitter = TextStreamSentencizer(remove_emoji=True)
+            is_first_sentence = True
+            start_time = time.perf_counter()
+            async for token in self._input_ch:
+                if isinstance(token, self._FlushSentinel):
+                    sentences = splitter.flush()
+                else:
+                    sentences = splitter.push(text=token)
+                for sentence in sentences:
+                    if not sentence.strip():
+                        continue
+                    if is_first_sentence:
+                        first_sentence_spend = time.perf_counter() - start_time
+                        logger.info(
+                            "llm first sentence",
+                            extra={"spent": str(first_sentence_spend)},
+                        )
+                        is_first_sentence = False
+                    logger.info("tts start", extra={"sentence": sentence})
+                    await ws.send_json(
+                        self._opts.get_continue_task_params(
+                            text=sentence, task_id=task_id
+                        )
+                    )
+
+            await ws.send_json(self._opts.get_finish_task_params(task_id=task_id))
 
         async def _recv_task(ws: aiohttp.ClientWebSocketResponse):
             is_first_response = True
             start_time = time.perf_counter()
             while True:
-                try:
-                    msg = await ws.receive()
-                except Exception as e:
-                    logger.warning(f"Error while receiving bytes: {e}")
-                    break
+                msg = await ws.receive()
+                if msg.type in (
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSING,
+                    aiohttp.WSMsgType.ERROR,
+                ):
+                    raise APIStatusError(
+                        message="connection closed unexpectedly", retryable=True
+                    )
                 if msg.type == aiohttp.WSMsgType.BINARY:
                     if is_first_response:
                         elapsed_time = time.perf_counter() - start_time
@@ -219,44 +255,28 @@ class SynthesizeStream(tts.SynthesizeStream):
                     emitter.push(data=msg.data)
                 elif msg.type == aiohttp.WSMsgType.TEXT:
                     msg_json = json.loads(msg.data)
-                    if "header" in msg_json:
-                        header = msg_json["header"]
-                        if "event" in header:
-                            event = header["event"]
-                            if event == "task-finished":
-                                break
-                            if event == "task-failed":
-                                logger.error(f"tts task failed: {msg_json}")
-                                break
+                    header = msg_json.get("header") or {}
+                    event = header.get("event")
+                    if event == "task-started":
+                        started.set()
+                    elif event == "task-finished":
+                        break
+                    elif event == "task-failed":
+                        raise APIStatusError(
+                            message=f"tts task failed: {msg_json}",
+                            retryable=True,
+                        )
 
-        splitter = TextStreamSentencizer(remove_emoji=True)
-        is_first_sentence = True
-        start_time = time.perf_counter()
-        async for token in self._input_ch:
-            if isinstance(token, self._FlushSentinel):
-                sentences = splitter.flush()
-            else:
-                sentences = splitter.push(text=token)
-            for sentence in sentences:
-                if is_first_sentence:
-                    first_sentence_spend = time.perf_counter() - start_time
-                    logger.info(
-                        "llm first sentence",
-                        extra={"spent": str(first_sentence_spend)},
-                    )
-                    is_first_sentence = False
-                logger.info("tts start", extra={"sentence": sentence})
-                emitter.start_segment(segment_id=utils.shortuuid())
-                async with self._tts._pool.connection(
-                    timeout=self._conn_options.timeout
-                ) as ws:
-                    assert not ws.closed, "WebSocket connection is closed"
-                    tasks = [
-                        asyncio.create_task(_send_task(sentence=sentence, ws=ws)),
-                        asyncio.create_task(_recv_task(ws=ws)),
-                    ]
-                    await asyncio.gather(*tasks)
-                    emitter.end_segment()
-                    logger.info("tts end", extra={"sentence": sentence})
-                    self._pushed_text = self._pushed_text.replace(sentence, "")
-                    await utils.aio.gracefully_cancel(*tasks)
+        async with self._tts._pool.connection(timeout=self._conn_options.timeout) as ws:
+            assert not ws.closed, "WebSocket connection is closed"
+            emitter.start_segment(segment_id=request_id)
+            tasks = [
+                asyncio.create_task(_send_task(ws)),
+                asyncio.create_task(_recv_task(ws)),
+            ]
+            try:
+                await asyncio.gather(*tasks)
+            finally:
+                await utils.aio.gracefully_cancel(*tasks)
+            emitter.end_segment()
+            logger.info("tts end")
