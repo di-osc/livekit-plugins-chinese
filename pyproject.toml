@@ -42,7 +42,6 @@ dev = [
     "srsly>=2.5.1",
     "loguru>=0.7.3",
     "polars>=1.33.0",
-    "livekit-plugins-wuba>=1.2.3",
     "xlsxwriter>=3.2.5",
 ]
 
