@@ -162,9 +162,45 @@ def test_model_rejects_cloned_voice_from_another_model() -> None:
         )
 
 
+@pytest.mark.parametrize("model", ["qwen-audio-3.1-realtime-plus", "qwen-audio-3.1-realtime-flash"])
+@pytest.mark.parametrize(
+    "voice",
+    [
+        "longanqian_v3.1",
+        "longanlingxin_v3.1",
+        "longanfengyue_v3.1",
+        "longyue_v3.1",
+        "qwen-audio-3.1-tts-flash-zora_bg",
+    ],
+)
+def test_model_accepts_3_1_system_voices(model: str, voice: str) -> None:
+    realtime_model = RealtimeModel(api_key="test", model=model, voice=voice)  # type: ignore[arg-type]
+    assert realtime_model._opts.voice == voice
+
+
+def test_model_rejects_3_0_voice_on_3_1_model() -> None:
+    with pytest.raises(ValueError, match="same model generation"):
+        RealtimeModel(
+            api_key="test",
+            model="qwen-audio-3.1-realtime-flash",
+            voice="longanqian",  # type: ignore[arg-type]
+        )
+
+
+def test_model_rejects_3_1_voice_on_3_0_model() -> None:
+    with pytest.raises(ValueError, match="same model generation"):
+        RealtimeModel(
+            api_key="test",
+            model="qwen-audio-3.0-realtime-plus",
+            voice="longanqian_v3.1",  # type: ignore[arg-type]
+        )
+
+
 @pytest.mark.parametrize(
     ("model", "expected_cost_cny"),
     [
+        ("qwen-audio-3.1-realtime-plus", 0.09925),
+        ("qwen-audio-3.1-realtime-flash", 0.0114),
         ("qwen-audio-3.0-realtime-plus", 0.09925),
         ("qwen-audio-3.0-realtime-flash", 0.069),
     ],
@@ -180,6 +216,67 @@ def test_estimate_response_cost_uses_model_specific_token_prices(
         output_text_tokens=200,
         output_audio_tokens=375,
     ) == pytest.approx(expected_cost_cny)
+
+
+def test_tool_schema_normalization_for_qwen_31() -> None:
+    # Qwen Audio 3.1 fails generation with InternalError when a tool schema
+    # carries LiveKit's union type arrays or OpenAI strict-mode's
+    # additionalProperties:false.
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "show_in_browser",
+            "description": "展示页面",
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": ["string", "null"]},
+                    "html": {"type": ["string", "null"]},
+                    "title": {"type": "string"},
+                },
+                "required": ["url", "html", "title"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    normalized = aliyun_realtime._normalize_qwen_tool_schema(tool)
+    parameters = normalized["function"]["parameters"]
+    assert parameters == {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string"},
+            "html": {"type": "string"},
+            "title": {"type": "string"},
+        },
+        "required": ["url", "html", "title"],
+    }
+    # original schema is left untouched
+    assert tool["function"]["parameters"]["properties"]["url"]["type"] == ["string", "null"]
+    assert "additionalProperties" in tool["function"]["parameters"]
+
+
+def test_replay_skips_empty_transcript_assistant_items() -> None:
+    # A server echo of an interrupted assistant message carries no text; Qwen
+    # 3.1 rejects replaying it ("must have non-empty 'content'").
+
+    async def run() -> list[dict]:
+        model = RealtimeModel(api_key="test")
+        session = model.session()
+        try:
+            ctx = session.chat_ctx.copy()
+            ctx.add_message(role="user", content="你好")
+            ctx.add_message(role="assistant", content="")
+            session._chat_ctx = ctx
+            return session._create_chat_ctx_events()
+        finally:
+            await session.aclose()
+            await model.aclose()
+
+    events = asyncio.run(run())
+    items = [event["item"] for event in events]
+    assert [item["role"] for item in items] == ["user"]
+    assert items[0]["content"][0]["text"] == "你好"
 
 
 @pytest.mark.asyncio
