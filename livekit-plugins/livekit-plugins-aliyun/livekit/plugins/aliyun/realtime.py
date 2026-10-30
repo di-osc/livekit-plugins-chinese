@@ -2069,6 +2069,10 @@ class RealtimeSession(
             self.send_event({"type": "response.cancel"})
         self._cancelled_response_ids.add(generation.response_id)
         self._close_generation(reason)
+        # The cancelled response's response.done arrives on the early-return
+        # path that never refreshes the gate, so without this every later
+        # generate_reply waits forever for response.create dispatching.
+        self._refresh_response_create_ready()
 
     def _fail_pending_generations(self, reason: str) -> None:
         """Fail every response request still waiting for ``response.created``."""
