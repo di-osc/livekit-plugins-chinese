@@ -162,9 +162,45 @@ def test_model_rejects_cloned_voice_from_another_model() -> None:
         )
 
 
+@pytest.mark.parametrize("model", ["qwen-audio-3.1-realtime-plus", "qwen-audio-3.1-realtime-flash"])
+@pytest.mark.parametrize(
+    "voice",
+    [
+        "longanqian_v3.1",
+        "longanlingxin_v3.1",
+        "longanfengyue_v3.1",
+        "longyue_v3.1",
+        "qwen-audio-3.1-tts-flash-zora_bg",
+    ],
+)
+def test_model_accepts_3_1_system_voices(model: str, voice: str) -> None:
+    realtime_model = RealtimeModel(api_key="test", model=model, voice=voice)  # type: ignore[arg-type]
+    assert realtime_model._opts.voice == voice
+
+
+def test_model_rejects_3_0_voice_on_3_1_model() -> None:
+    with pytest.raises(ValueError, match="same model generation"):
+        RealtimeModel(
+            api_key="test",
+            model="qwen-audio-3.1-realtime-flash",
+            voice="longanqian",  # type: ignore[arg-type]
+        )
+
+
+def test_model_rejects_3_1_voice_on_3_0_model() -> None:
+    with pytest.raises(ValueError, match="same model generation"):
+        RealtimeModel(
+            api_key="test",
+            model="qwen-audio-3.0-realtime-plus",
+            voice="longanqian_v3.1",  # type: ignore[arg-type]
+        )
+
+
 @pytest.mark.parametrize(
     ("model", "expected_cost_cny"),
     [
+        ("qwen-audio-3.1-realtime-plus", 0.09925),
+        ("qwen-audio-3.1-realtime-flash", 0.0114),
         ("qwen-audio-3.0-realtime-plus", 0.09925),
         ("qwen-audio-3.0-realtime-flash", 0.069),
     ],
