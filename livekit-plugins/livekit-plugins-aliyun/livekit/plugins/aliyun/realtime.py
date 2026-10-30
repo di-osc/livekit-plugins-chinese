@@ -840,7 +840,8 @@ class RealtimeSession(
                 "Qwen Audio Realtime ignores unsupported provider tools",
                 extra={"unsupported_tool_count": unsupported},
             )
-        return llm.ToolContext(supported).parse_function_tools("openai")
+        converted = llm.ToolContext(supported).parse_function_tools("openai")
+        return [_normalize_qwen_tool_schema(tool) for tool in converted]
 
     async def update_chat_ctx(self, chat_ctx: llm.ChatContext) -> None:
         """Synchronize a LiveKit chat context with Qwen conversation items.
@@ -2109,6 +2110,46 @@ def _process_base_url(base_url: str, model: str) -> str:
             "",
         )
     )
+
+
+def _normalize_schema_value(value: Any) -> Any:
+    """Normalize a JSON Schema fragment to what Qwen Audio accepts.
+
+    Two LiveKit-generated constructs break Qwen Audio 3.1 with a hard
+    InternalError on every generation (3.0 tolerated both):
+
+    - ``"type": ["string", "null"]`` union arrays for optional parameters.
+      Collapsed to the first non-``"null"`` entry; optionality is already
+      expressed by the ``required`` list.
+    - ``"additionalProperties": false``, which OpenAI strict-mode schemas
+      set on every object. Dropped entirely: Qwen does not support the
+      keyword and rejects the whole tool when it is present.
+    """
+    if isinstance(value, dict):
+        normalized = {
+            key: _normalize_schema_value(item)
+            for key, item in value.items()
+            if key != "additionalProperties"
+        }
+        type_value = normalized.get("type")
+        if isinstance(type_value, list):
+            non_null = [entry for entry in type_value if entry != "null"]
+            normalized["type"] = non_null[0] if non_null else type_value[0]
+        return normalized
+    if isinstance(value, list):
+        return [_normalize_schema_value(entry) for entry in value]
+    return value
+
+
+def _normalize_qwen_tool_schema(tool: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(tool)
+    function = normalized.get("function")
+    if isinstance(function, dict):
+        function = dict(function)
+        if isinstance(function.get("parameters"), dict):
+            function["parameters"] = _normalize_schema_value(function["parameters"])
+        normalized["function"] = function
+    return normalized
 
 
 def _is_replayable_item(item: llm.ChatItem) -> bool:

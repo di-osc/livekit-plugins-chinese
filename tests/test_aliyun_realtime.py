@@ -218,6 +218,44 @@ def test_estimate_response_cost_uses_model_specific_token_prices(
     ) == pytest.approx(expected_cost_cny)
 
 
+def test_tool_schema_normalization_for_qwen_31() -> None:
+    # Qwen Audio 3.1 fails generation with InternalError when a tool schema
+    # carries LiveKit's union type arrays or OpenAI strict-mode's
+    # additionalProperties:false.
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "show_in_browser",
+            "description": "展示页面",
+            "strict": True,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": ["string", "null"]},
+                    "html": {"type": ["string", "null"]},
+                    "title": {"type": "string"},
+                },
+                "required": ["url", "html", "title"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    normalized = aliyun_realtime._normalize_qwen_tool_schema(tool)
+    parameters = normalized["function"]["parameters"]
+    assert parameters == {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string"},
+            "html": {"type": "string"},
+            "title": {"type": "string"},
+        },
+        "required": ["url", "html", "title"],
+    }
+    # original schema is left untouched
+    assert tool["function"]["parameters"]["properties"]["url"]["type"] == ["string", "null"]
+    assert "additionalProperties" in tool["function"]["parameters"]
+
+
 def test_replay_skips_empty_transcript_assistant_items() -> None:
     # A server echo of an interrupted assistant message carries no text; Qwen
     # 3.1 rejects replaying it ("must have non-empty 'content'").
