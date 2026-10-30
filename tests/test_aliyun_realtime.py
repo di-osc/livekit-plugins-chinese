@@ -218,6 +218,29 @@ def test_estimate_response_cost_uses_model_specific_token_prices(
     ) == pytest.approx(expected_cost_cny)
 
 
+def test_replay_skips_empty_transcript_assistant_items() -> None:
+    # A server echo of an interrupted assistant message carries no text; Qwen
+    # 3.1 rejects replaying it ("must have non-empty 'content'").
+
+    async def run() -> list[dict]:
+        model = RealtimeModel(api_key="test")
+        session = model.session()
+        try:
+            ctx = session.chat_ctx.copy()
+            ctx.add_message(role="user", content="你好")
+            ctx.add_message(role="assistant", content="")
+            session._chat_ctx = ctx
+            return session._create_chat_ctx_events()
+        finally:
+            await session.aclose()
+            await model.aclose()
+
+    events = asyncio.run(run())
+    items = [event["item"] for event in events]
+    assert [item["role"] for item in items] == ["user"]
+    assert items[0]["content"][0]["text"] == "你好"
+
+
 @pytest.mark.asyncio
 async def test_initial_generation_instruction_becomes_qwen_user_message() -> None:
     model = RealtimeModel(

@@ -867,7 +867,7 @@ class RealtimeSession(
                     {"type": "conversation.item.delete", "item_id": item_id}
                 )
             item = new_ctx.get_by_id(item_id)
-            if item is None:
+            if item is None or not _is_replayable_item(item):
                 continue
             event: dict[str, Any] = {
                 "type": "conversation.item.create",
@@ -884,6 +884,8 @@ class RealtimeSession(
         previous_item_id: str | None = None
         for item in self._chat_ctx.items:
             if item.type not in {"message", "function_call", "function_call_output"}:
+                continue
+            if not _is_replayable_item(item):
                 continue
             event: dict[str, Any] = {
                 "type": "conversation.item.create",
@@ -2106,6 +2108,22 @@ def _process_base_url(base_url: str, model: str) -> str:
             urlencode(query, doseq=True),
             "",
         )
+    )
+
+
+def _is_replayable_item(item: llm.ChatItem) -> bool:
+    """Whether the item may be (re)sent via ``conversation.item.create``.
+
+    Message items without any text content are dropped: a server echo of an
+    assistant message whose generation was interrupted before its first
+    transcript delta yields an empty-content item, which Qwen 3.1 rejects
+    with ``invalid_value`` when the context is replayed after a reconnect
+    (3.0 silently accepted it).
+    """
+    if item.type != "message":
+        return True
+    return bool(item.text_content) or any(
+        isinstance(value, llm.AudioContent) for value in item.content
     )
 
 
