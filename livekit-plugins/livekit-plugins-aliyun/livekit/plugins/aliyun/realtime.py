@@ -41,24 +41,36 @@ DEFAULT_MAX_SESSION_DURATION: int = 20 * 60
 _RESPONSE_CREATE_TIMEOUT: float = 10.0
 
 RealtimeModelName = Literal[
+    "qwen-audio-3.1-realtime-plus",
+    "qwen-audio-3.1-realtime-flash",
     "qwen-audio-3.0-realtime-plus",
     "qwen-audio-3.0-realtime-flash",
 ]
-"""Qwen Audio 3.0 model identifiers accepted by the Realtime API."""
+"""Qwen Audio Realtime model identifiers accepted by the Realtime API."""
 
 SystemVoice = Literal[
+    # Qwen Audio 3.0 built-in voices.
     "longanqian",
     "longanlingxin",
     "longanlingxi",
     "longanxiaoxin",
     "longanlufeng",
+    # Qwen Audio 3.1 longan-family voices; the full 3.1 system voice set
+    # (the union of the 3.1 TTS voice lists) is far larger and keeps growing,
+    # so runtime validation accepts every ``*_v3.1`` voice id.
+    "longanqian_v3.1",
+    "longanlingxin_v3.1",
+    "longanlingxi_v3.1",
+    "longanhuan_v3.1",
+    "longanfengyue_v3.1",
 ]
-"""Built-in Qwen Audio 3.0 Realtime voices."""
+"""Built-in Qwen Audio Realtime voices (3.0 names for 3.0 models, ``_v3.1``
+names for 3.1 models; voice ids cannot be mixed across model versions)."""
 
 ClonedVoiceId = NewType("ClonedVoiceId", str)
 """A ``voice_id`` returned by Alibaba Cloud Model Studio voice cloning.
 
-Wrap a cloned ID with this type to distinguish it from the five built-in
+Wrap a cloned ID with this type to distinguish it from the built-in system
 voices in static analysis and IDE completion:
 
 .. code-block:: python
@@ -164,6 +176,18 @@ class _RealtimeTokenPrices:
 
 
 _REALTIME_TOKEN_PRICES: dict[RealtimeModelName, _RealtimeTokenPrices] = {
+    "qwen-audio-3.1-realtime-plus": _RealtimeTokenPrices(
+        input_text=5.0,
+        input_audio=40.0,
+        output_text=40.0,
+        output_audio=150.0,
+    ),
+    "qwen-audio-3.1-realtime-flash": _RealtimeTokenPrices(
+        input_text=1.5,
+        input_audio=6.0,
+        output_text=4.5,
+        output_audio=12.0,
+    ),
     "qwen-audio-3.0-realtime-plus": _RealtimeTokenPrices(
         input_text=5.0,
         input_audio=40.0,
@@ -816,7 +840,8 @@ class RealtimeSession(
                 "Qwen Audio Realtime ignores unsupported provider tools",
                 extra={"unsupported_tool_count": unsupported},
             )
-        return llm.ToolContext(supported).parse_function_tools("openai")
+        converted = llm.ToolContext(supported).parse_function_tools("openai")
+        return [_normalize_qwen_tool_schema(tool) for tool in converted]
 
     async def update_chat_ctx(self, chat_ctx: llm.ChatContext) -> None:
         """Synchronize a LiveKit chat context with Qwen conversation items.
@@ -843,7 +868,7 @@ class RealtimeSession(
                     {"type": "conversation.item.delete", "item_id": item_id}
                 )
             item = new_ctx.get_by_id(item_id)
-            if item is None:
+            if item is None or not _is_replayable_item(item):
                 continue
             event: dict[str, Any] = {
                 "type": "conversation.item.create",
@@ -860,6 +885,8 @@ class RealtimeSession(
         previous_item_id: str | None = None
         for item in self._chat_ctx.items:
             if item.type not in {"message", "function_call", "function_call_output"}:
+                continue
+            if not _is_replayable_item(item):
                 continue
             event: dict[str, Any] = {
                 "type": "conversation.item.create",
@@ -2042,6 +2069,10 @@ class RealtimeSession(
             self.send_event({"type": "response.cancel"})
         self._cancelled_response_ids.add(generation.response_id)
         self._close_generation(reason)
+        # The cancelled response's response.done arrives on the early-return
+        # path that never refreshes the gate, so without this every later
+        # generate_reply waits forever for response.create dispatching.
+        self._refresh_response_create_ready()
 
     def _fail_pending_generations(self, reason: str) -> None:
         """Fail every response request still waiting for ``response.created``."""
@@ -2082,6 +2113,62 @@ def _process_base_url(base_url: str, model: str) -> str:
             urlencode(query, doseq=True),
             "",
         )
+    )
+
+
+def _normalize_schema_value(value: Any) -> Any:
+    """Normalize a JSON Schema fragment to what Qwen Audio accepts.
+
+    Two LiveKit-generated constructs break Qwen Audio 3.1 with a hard
+    InternalError on every generation (3.0 tolerated both):
+
+    - ``"type": ["string", "null"]`` union arrays for optional parameters.
+      Collapsed to the first non-``"null"`` entry; optionality is already
+      expressed by the ``required`` list.
+    - ``"additionalProperties": false``, which OpenAI strict-mode schemas
+      set on every object. Dropped entirely: Qwen does not support the
+      keyword and rejects the whole tool when it is present.
+    """
+    if isinstance(value, dict):
+        normalized = {
+            key: _normalize_schema_value(item)
+            for key, item in value.items()
+            if key != "additionalProperties"
+        }
+        type_value = normalized.get("type")
+        if isinstance(type_value, list):
+            non_null = [entry for entry in type_value if entry != "null"]
+            normalized["type"] = non_null[0] if non_null else type_value[0]
+        return normalized
+    if isinstance(value, list):
+        return [_normalize_schema_value(entry) for entry in value]
+    return value
+
+
+def _normalize_qwen_tool_schema(tool: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(tool)
+    function = normalized.get("function")
+    if isinstance(function, dict):
+        function = dict(function)
+        if isinstance(function.get("parameters"), dict):
+            function["parameters"] = _normalize_schema_value(function["parameters"])
+        normalized["function"] = function
+    return normalized
+
+
+def _is_replayable_item(item: llm.ChatItem) -> bool:
+    """Whether the item may be (re)sent via ``conversation.item.create``.
+
+    Message items without any text content are dropped: a server echo of an
+    assistant message whose generation was interrupted before its first
+    transcript delta yields an empty-content item, which Qwen 3.1 rejects
+    with ``invalid_value`` when the context is replayed after a reconnect
+    (3.0 silently accepted it).
+    """
+    if item.type != "message":
+        return True
+    return bool(item.text_content) or any(
+        isinstance(value, llm.AudioContent) for value in item.content
     )
 
 
@@ -2162,12 +2249,22 @@ def _qwen_item_to_livekit_item(item: dict[str, Any]) -> llm.ChatItem:
 
 
 def _validate_model_and_voice(model: str, voice: str) -> None:
-    """Validate public model/voice values and cloned-voice model affinity."""
+    """Validate public model/voice values and cloned-voice model affinity.
+
+    3.1 and 3.0 system voices are not interchangeable: DashScope rejects a
+    3.0 voice id on a 3.1 model (and vice versa) with InvalidParameter, so
+    each model family only accepts its own voice naming. The 3.1 system set
+    is the union of the qwen-audio-3.1-tts voice lists and grows over time,
+    therefore any ``*_v3.1`` id (or small-language
+    ``qwen-audio-3.1-tts-<locale>-<name>`` id) is accepted as a system voice.
+    """
     supported_models = {
+        "qwen-audio-3.1-realtime-plus",
+        "qwen-audio-3.1-realtime-flash",
         "qwen-audio-3.0-realtime-plus",
         "qwen-audio-3.0-realtime-flash",
     }
-    system_voices = {
+    system_voices_30 = {
         "longanqian",
         "longanlingxin",
         "longanlingxi",
@@ -2179,12 +2276,16 @@ def _validate_model_and_voice(model: str, voice: str) -> None:
         raise ValueError(
             f"unsupported Qwen Audio Realtime model {model!r}; use {choices}"
         )
-    if voice in system_voices:
+    if model.startswith("qwen-audio-3.1-"):
+        if voice.endswith("_v3.1") or voice.startswith("qwen-audio-3.1-tts-"):
+            return
+    elif voice in system_voices_30:
         return
     if not voice.startswith(f"{model}-"):
         raise ValueError(
-            f"unsupported voice {voice!r}; use a built-in SystemVoice or a "
-            f"ClonedVoiceId created with target_model={model!r}"
+            f"unsupported voice {voice!r} for model {model!r}; use a built-in "
+            f"SystemVoice of the same model generation or a ClonedVoiceId "
+            f"created with target_model={model!r}"
         )
 
 
