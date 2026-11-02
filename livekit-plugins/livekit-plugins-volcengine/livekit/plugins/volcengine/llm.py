@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 import openai
 from openai.resources.chat import AsyncChat as _AsyncChat
 from openai.types.chat import ChatCompletionChunk, ChatCompletionToolChoiceOptionParam
