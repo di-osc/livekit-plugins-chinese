@@ -11,14 +11,10 @@ constraint-dependencies = [
 [tool.uv.sources]
 livekit-agents = { index = "pypi" }
 livekit-plugins-volcengine = { workspace = true }
-livekit-plugins-xunfei = { workspace = true }
-livekit-plugins-baidu = { workspace = true }
-livekit-plugins-tencent = { workspace = true}
-livekit-plugins-minimax = { workspace = true}
-livekit-plugins-zhipu = { workspace = true}
 livekit-plugins-dify = { workspace = true}
 livekit-plugins-flashtts = { workspace = true}
 livekit-plugins-aliyun = { workspace = true}
+livekit-plugins-stepfun = { workspace = true}
 
 [tool.uv.workspace]
 members = ["livekit-plugins/*"]
