@@ -39,8 +39,6 @@ uv run examples/aliyun_qwen_omini_realtime.py console
 uv run examples/volcengine_realtime.py console
 ```
 
-`console` 只使用麦克风。Qwen-Omni 的摄像头画面需要在带视频轨道的房间里运行。
-
 ## 插件列表
 
 | 厂商 | STT | TTS | LLM | Realtime | 使用说明 |
