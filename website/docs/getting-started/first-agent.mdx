@@ -13,6 +13,8 @@ menu:
 
 ## 准备环境变量 {id="env"}
 
+仓库根目录的 `.env.example` 列出了全部环境变量。复制为 `.env` 后至少填写：
+
 ```bash
 DASHSCOPE_API_KEY=sk-ws-your-key
 LIVEKIT_URL=wss://your-project.livekit.cloud
@@ -20,7 +22,7 @@ LIVEKIT_API_KEY=your-livekit-key
 LIVEKIT_API_SECRET=your-livekit-secret
 ```
 
-不要把真实密钥提交到 Git。开发环境可使用 `python-dotenv` 从 `.env` 加载。
+不要把真实密钥提交到 Git。开发环境可使用 `python-dotenv` 从 `.env` 加载。`console` 模式不需要 LiveKit 房间凭证。
 
 ## 创建 Agent {id="agent"}
 
@@ -78,13 +80,13 @@ Realtime 模型自身完成听、理解和说，只把一个 `RealtimeModel` 传
 ```python
 session = AgentSession(
     llm=aliyun.RealtimeModel(
-        model="qwen-audio-3.0-realtime-plus",
-        voice="longanqian",
-        workspace_id="your-workspace-id",
-        turn_detection={"type": "smart_turn"},
+        model="qwen-audio-3.1-realtime-plus",
+        voice="longanqian_v3.1",
     )
 )
 ```
 
-Realtime 模式不需要再配置独立的 STT 与 TTS。详细的音色、轮次检测、开场语和工具
-调用行为见[阿里云插件](/plugins/aliyun)与[Realtime 会话](/guides/realtime)。
+不传 `turn_detection` 时默认是 `server_vad`。需要摄像头时改用 Qwen-Omni，并打开
+`room_io.RoomOptions(video_input=True)`。Realtime 模式不需要再配置独立的 STT 与
+TTS。详细的音色、轮次检测、开场语和工具调用行为见[阿里云插件](/plugins/aliyun)与
+[Realtime 会话](/guides/realtime)。

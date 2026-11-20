@@ -9,7 +9,8 @@
 
 ### ✨ 新增
 
-- 阿里云 Qwen Audio Realtime 模型支持
+- 阿里云 Qwen Audio Realtime，支持 3.0 与 3.1。Audio 与 Omni 默认轮次检测都是 `server_vad`
+- 阿里云 Qwen-Omni Realtime，支持语音以及图片、视频输入
 - 基于 GitHub Pages 的[在线插件文档](https://di-osc.github.io/livekit-plugins-chinese/)
 
 ### 📦 支持调整
@@ -24,6 +25,21 @@
 
 </details>
 
+## 环境变量
+
+复制 [`.env.example`](.env.example) 为 `.env`，再填入要用的密钥。示例通过 `python-dotenv` 加载这个文件。各变量的申请入口见[密钥与环境变量](https://di-osc.github.io/livekit-plugins-chinese/getting-started/credentials)。
+
+## 示例
+
+```bash
+uv sync
+uv run examples/aliyun_pipeline.py console
+uv run examples/aliyun_qwen_audio_realtime.py console
+uv run examples/aliyun_qwen_omini_realtime.py console
+uv run examples/volcengine_realtime.py console
+```
+
+`console` 只使用麦克风。Qwen-Omni 的摄像头画面需要在带视频轨道的房间里运行。
 
 ## 插件列表
 

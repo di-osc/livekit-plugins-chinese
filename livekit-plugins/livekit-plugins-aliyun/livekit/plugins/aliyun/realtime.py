@@ -14,6 +14,8 @@ from typing import Any, Literal, NewType
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import aiohttp
+import av
+import numpy as np
 from typing_extensions import TypedDict
 
 from livekit import rtc
@@ -45,8 +47,11 @@ RealtimeModelName = Literal[
     "qwen-audio-3.1-realtime-flash",
     "qwen-audio-3.0-realtime-plus",
     "qwen-audio-3.0-realtime-flash",
+    "qwen3.8-omni-flash-realtime",
+    "qwen3.5-omni-plus-realtime",
+    "qwen3.5-omni-flash-realtime",
 ]
-"""Qwen Audio Realtime model identifiers accepted by the Realtime API."""
+"""Qwen Audio and Qwen-Omni Realtime model identifiers."""
 
 SystemVoice = Literal[
     # Qwen Audio 3.0 built-in voices.
@@ -88,6 +93,9 @@ Voice = SystemVoice | ClonedVoiceId
 
 DEFAULT_MODEL: RealtimeModelName = "qwen-audio-3.0-realtime-plus"
 DEFAULT_VOICE: SystemVoice = "longanqian"
+DEFAULT_AUDIO_31_VOICE: SystemVoice = "longanqian_v3.1"
+DEFAULT_OMNI_VOICE: str = "Tina"
+"""Default Qwen-Omni output voice for the 3.5 and 3.8 realtime series."""
 
 Modalities = list[Literal["text", "audio"]]
 """Output modalities accepted by the Qwen Audio Realtime API."""
@@ -116,14 +124,15 @@ class ServerVadOptions(_ServerVadRequired, total=False):
 
 
 class _SmartTurnRequired(TypedDict):
-    type: Literal["smart_turn"]
+    type: Literal["smart_turn", "smart_turn_v2"]
 
 
 class SmartTurnOptions(_SmartTurnRequired, total=False):
     """Semantic turn detection configuration.
 
     Attributes:
-        type: Discriminator required by Qwen; always ``"smart_turn"``.
+        type: ``"smart_turn"`` or the newer ``"smart_turn_v2"``. Qwen recommends
+            ``"smart_turn_v2"`` for Qwen Audio 3.1.
         voiceprint_audio_urls: Up to five public URLs containing 16 kHz PCM or
             WAV samples of the target speaker. Qwen uses them to suppress
             unrelated speakers and background speech.
@@ -132,10 +141,36 @@ class SmartTurnOptions(_SmartTurnRequired, total=False):
     voiceprint_audio_urls: list[str]
 
 
-TurnDetection = ServerVadOptions | SmartTurnOptions | None
+class _SemanticVadRequired(TypedDict):
+    type: Literal["semantic_vad", "semantic_vad_ec"]
+
+
+class SemanticVadOptions(_SemanticVadRequired, total=False):
+    """Semantic turn detection configuration for Qwen-Omni Realtime.
+
+    Attributes:
+        type: ``"semantic_vad"`` filters backchannels and background speech.
+            ``"semantic_vad_ec"`` interrupts more readily and is intended for
+            Qwen3.8 customer-service conversations.
+        threshold: Detection sensitivity in ``[-1.0, 1.0]``. Lower values are
+            more sensitive. Qwen's default is ``0.5``.
+        silence_duration_ms: End-of-turn silence in milliseconds. The valid
+            range is ``200`` to ``6000``. Qwen's default is ``800``.
+    """
+
+    threshold: float
+    silence_duration_ms: int
+
+
+TurnDetection = ServerVadOptions | SmartTurnOptions | SemanticVadOptions | None
 """Qwen VAD configuration; ``None`` selects manual push-to-talk mode."""
 
-DEFAULT_TURN_DETECTION: SmartTurnOptions = {"type": "smart_turn"}
+DEFAULT_TURN_DETECTION: ServerVadOptions = {"type": "server_vad"}
+DEFAULT_OMNI_TURN_DETECTION: ServerVadOptions = {"type": "server_vad"}
+_SMART_TURN_TYPES = frozenset({"smart_turn", "smart_turn_v2"})
+_OMNI_IMAGE_INTERVAL_S: float = 1.0
+_OMNI_MAX_JPEG_BYTES: int = 190 * 1024
+_OMNI_MAX_IMAGE_EDGE: int = 1280
 
 _DEBUG = int(os.getenv("LK_ALIYUN_REALTIME_DEBUG", "0"))
 _TOKENS_PER_MILLION: int = 1_000_000
@@ -276,8 +311,8 @@ class _RealtimeOptions:
 
     model: RealtimeModelName
     """Supported Qwen Audio 3.0 Realtime model identifier."""
-    voice: Voice
-    """Built-in Qwen voice or model-bound cloned ``voice_id``."""
+    voice: str
+    """Built-in Qwen voice, Omni voice, or model-bound cloned ``voice_id``."""
     modalities: Modalities
     """Enabled response modalities."""
     turn_detection: TurnDetection
@@ -379,7 +414,7 @@ class RealtimeModel(llm.RealtimeModel):
         self,
         *,
         model: RealtimeModelName = DEFAULT_MODEL,
-        voice: Voice = DEFAULT_VOICE,
+        voice: NotGivenOr[Voice | str] = NOT_GIVEN,
         modalities: NotGivenOr[Modalities] = NOT_GIVEN,
         turn_detection: NotGivenOr[TurnDetection] = NOT_GIVEN,
         tool_choice: NotGivenOr[llm.ToolChoice | None] = NOT_GIVEN,
@@ -393,20 +428,22 @@ class RealtimeModel(llm.RealtimeModel):
         max_session_duration: NotGivenOr[float | None] = NOT_GIVEN,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> None:
-        """Create a Qwen Audio 3.0 Realtime model adapter.
+        """Create a Qwen Audio or Qwen-Omni Realtime model adapter.
 
         Args:
-            model (RealtimeModelName): Qwen Audio 3.0 Realtime model. Choose
-                ``"qwen-audio-3.0-realtime-plus"`` (default) or
-                ``"qwen-audio-3.0-realtime-flash"``.
-            voice (Voice): Built-in voice or a custom cloned voice ID. Built-in
-                choices are ``"longanqian"``, ``"longanlingxin"``,
-                ``"longanlingxi"``, ``"longanxiaoxin"``, and
-                ``"longanlufeng"``. For a cloned voice, pass
-                ``aliyun.ClonedVoiceId("...")`` using the ``voice_id`` returned
-                by Model Studio voice cloning. The cloned voice's target model
-                must equal ``model``. Defaults to ``"longanqian"``. Qwen only
-                applies the voice in the first ``session.update`` event.
+            model (RealtimeModelName): Qwen Audio or Qwen-Omni Realtime model.
+                Audio defaults to ``"qwen-audio-3.0-realtime-plus"``. Omni
+                models are ``"qwen3.8-omni-flash-realtime"``,
+                ``"qwen3.5-omni-plus-realtime"``, and
+                ``"qwen3.5-omni-flash-realtime"``. ``qwen3.8-omni-flash-realtime``
+                requires a workspace endpoint via ``workspace_id`` or
+                ``base_url``.
+            voice (NotGivenOr[Voice | str]): Built-in voice or a custom cloned
+                voice ID. Audio 3.0 defaults to ``"longanqian"``. Audio 3.1
+                defaults to ``"longanqian_v3.1"`` and accepts every ``*_v3.1``
+                voice or a :class:`ClonedVoiceId` created for the same model.
+                Omni models default to ``"Tina"``. Qwen only applies the voice
+                in the first ``session.update`` event.
             modalities (NotGivenOr[Modalities]): Response modalities. Supported
                 values are ``["text"]`` and a two-element list containing both
                 ``"text"`` and ``"audio"``. Defaults to
@@ -415,7 +452,11 @@ class RealtimeModel(llm.RealtimeModel):
                 Pass :class:`ServerVadOptions` for acoustic VAD,
                 :class:`SmartTurnOptions` for semantic turn detection, or
                 ``None`` for manual push-to-talk. Defaults to
-                ``{"type": "smart_turn"}``.
+                ``{"type": "server_vad"}`` for both Audio and Omni models.
+                Omni does not accept ``smart_turn`` or ``smart_turn_v2``.
+                Pass :class:`SmartTurnOptions` for ``smart_turn`` or
+                ``smart_turn_v2``, or :class:`SemanticVadOptions` for
+                ``semantic_vad`` or ``semantic_vad_ec``.
             tool_choice (NotGivenOr[llm.ToolChoice | None]): LiveKit tool
                 selection preference retained for API compatibility. Qwen Audio
                 currently chooses tools automatically; forced or named choices
@@ -464,17 +505,13 @@ class RealtimeModel(llm.RealtimeModel):
             signed 16-bit mono PCM output at 24 kHz. The session adapter handles
             input resampling automatically.
         """
-        _validate_model_and_voice(model, voice)
+        voice_value = _resolve_voice(model, voice)
         modalities_value = modalities if is_given(modalities) else ["text", "audio"]
         if modalities_value not in (["text"], ["text", "audio"], ["audio", "text"]):
             raise ValueError(
                 "Qwen Audio Realtime modalities must be ['text'] or ['text', 'audio']"
             )
-        turn_detection_value = (
-            copy.deepcopy(turn_detection)
-            if is_given(turn_detection)
-            else copy.deepcopy(DEFAULT_TURN_DETECTION)
-        )
+        turn_detection_value = _resolve_turn_detection(model, turn_detection)
         capabilities = llm.RealtimeCapabilities(
             message_truncation=False,
             turn_detection=turn_detection_value is not None,
@@ -515,9 +552,18 @@ class RealtimeModel(llm.RealtimeModel):
         else:
             base_url_value = os.getenv("DASHSCOPE_REALTIME_BASE_URL", DEFAULT_BASE_URL)
 
+        if (
+            model == "qwen3.8-omni-flash-realtime"
+            and base_url_value == DEFAULT_BASE_URL
+        ):
+            logger.warning(
+                "qwen3.8-omni-flash-realtime requires a workspace endpoint; "
+                "pass workspace_id or base_url"
+            )
+
         self._opts = _RealtimeOptions(
             model=model,
-            voice=voice,
+            voice=voice_value,
             modalities=list(modalities_value),
             turn_detection=turn_detection_value,
             tool_choice=tool_choice if is_given(tool_choice) else None,
@@ -549,7 +595,7 @@ class RealtimeModel(llm.RealtimeModel):
     def update_options(
         self,
         *,
-        voice: NotGivenOr[Voice] = NOT_GIVEN,
+        voice: NotGivenOr[Voice | str] = NOT_GIVEN,
         turn_detection: NotGivenOr[TurnDetection] = NOT_GIVEN,
         tool_choice: NotGivenOr[llm.ToolChoice | None] = NOT_GIVEN,
         max_history_turns: NotGivenOr[int] = NOT_GIVEN,
@@ -557,7 +603,7 @@ class RealtimeModel(llm.RealtimeModel):
         """Update defaults and propagate them to every active session.
 
         Args:
-            voice (NotGivenOr[Voice]): New built-in voice or model-bound
+            voice (NotGivenOr[Voice | str]): New built-in voice or model-bound
                 :class:`ClonedVoiceId`. Qwen only applies the voice from the
                 first session update, so changing this after audio starts may
                 be ignored by the service.
@@ -574,10 +620,11 @@ class RealtimeModel(llm.RealtimeModel):
                 if ``max_history_turns`` is outside ``[1, 50]``.
         """
         if is_given(voice):
-            _validate_model_and_voice(self._opts.model, voice)
-            self._opts.voice = voice
+            self._opts.voice = _resolve_voice(self._opts.model, voice)
         if is_given(turn_detection):
-            self._opts.turn_detection = copy.deepcopy(turn_detection)
+            self._opts.turn_detection = _resolve_turn_detection(
+                self._opts.model, turn_detection
+            )
         if is_given(tool_choice):
             self._opts.tool_choice = tool_choice
         if is_given(max_history_turns):
@@ -695,6 +742,10 @@ class RealtimeSession(
         self._server_session_updated = asyncio.Event()
         """Set after Qwen accepts the initial ``session.update`` configuration."""
         self._closing: bool = False
+        self._audio_appended: bool = False
+        """Whether this session has already sent input audio to Qwen."""
+        self._last_image_at: float = 0.0
+        """Monotonic timestamp of the last image sent to Qwen-Omni."""
         self._main_atask: asyncio.Task[None] = asyncio.create_task(
             self._main_task(), name="AliyunRealtimeSession._main_task"
         )
@@ -727,14 +778,21 @@ class RealtimeSession(
             self._msg_ch.send_nowait(event)
 
     def _create_session_update_event(self) -> dict[str, Any]:
-        session: dict[str, Any] = {
-            "modalities": self._opts.modalities,
-            "voice": self._opts.voice,
-            "input_audio_format": "pcm",
-            "output_audio_format": "pcm",
-            "turn_detection": copy.deepcopy(self._opts.turn_detection),
-            "max_history_turns": self._opts.max_history_turns,
-        }
+        if _is_omni_model(self._opts.model):
+            session: dict[str, Any] = {
+                "modalities": self._opts.modalities,
+                "turn_detection": copy.deepcopy(self._opts.turn_detection),
+                "audio": _omni_audio_config(self._opts.voice),
+            }
+        else:
+            session = {
+                "modalities": self._opts.modalities,
+                "voice": self._opts.voice,
+                "input_audio_format": "pcm",
+                "output_audio_format": "pcm",
+                "turn_detection": copy.deepcopy(self._opts.turn_detection),
+                "max_history_turns": self._opts.max_history_turns,
+            }
         if self._instructions is not None:
             session["instructions"] = self._instructions
         tools = self._convert_tools(self._tools.flatten())
@@ -745,7 +803,7 @@ class RealtimeSession(
     def update_options(
         self,
         *,
-        voice: NotGivenOr[Voice] = NOT_GIVEN,
+        voice: NotGivenOr[Voice | str] = NOT_GIVEN,
         turn_detection: NotGivenOr[TurnDetection] = NOT_GIVEN,
         tool_choice: NotGivenOr[llm.ToolChoice | None] = NOT_GIVEN,
         max_history_turns: NotGivenOr[int] = NOT_GIVEN,
@@ -753,7 +811,7 @@ class RealtimeSession(
         """Queue a partial ``session.update`` for this conversation.
 
         Args:
-            voice (NotGivenOr[Voice]): New built-in voice or model-bound
+            voice (NotGivenOr[Voice | str]): New built-in voice or model-bound
                 :class:`ClonedVoiceId`. Qwen ignores voice changes after the
                 first session update.
             turn_detection (NotGivenOr[TurnDetection]): Acoustic VAD, semantic
@@ -771,14 +829,16 @@ class RealtimeSession(
         """
         changes: dict[str, Any] = {}
         if is_given(voice):
-            _validate_model_and_voice(self._opts.model, voice)
-            self._opts.voice = voice
-            changes["voice"] = voice
+            resolved_voice = _resolve_voice(self._opts.model, voice)
+            self._opts.voice = resolved_voice
+            if _is_omni_model(self._opts.model):
+                changes["audio"] = _omni_audio_config(resolved_voice)
+            else:
+                changes["voice"] = resolved_voice
         if is_given(turn_detection):
-            resolved_turn_detection = (
-                None
-                if self._turn_detection_disabled
-                else copy.deepcopy(turn_detection)
+            resolved_turn_detection = _resolve_turn_detection(
+                self._opts.model,
+                None if self._turn_detection_disabled else turn_detection,
             )
             self._opts.turn_detection = resolved_turn_detection
             changes["turn_detection"] = copy.deepcopy(resolved_turn_detection)
@@ -792,7 +852,10 @@ class RealtimeSession(
             if not 1 <= max_history_turns <= 50:
                 raise ValueError("max_history_turns must be between 1 and 50")
             self._opts.max_history_turns = max_history_turns
-            changes["max_history_turns"] = max_history_turns
+            if _is_omni_model(self._opts.model):
+                logger.warning("Qwen Omni Realtime ignores max_history_turns")
+            else:
+                changes["max_history_turns"] = max_history_turns
         if changes:
             self.send_event({"type": "session.update", "session": changes})
 
@@ -908,6 +971,7 @@ class RealtimeSession(
         """
         for resampled in self._resample_audio(frame):
             for chunk in self._audio_stream.write(resampled.data.tobytes()):
+                self._audio_appended = True
                 self.send_event(
                     {
                         "type": "input_audio_buffer.append",
@@ -916,13 +980,33 @@ class RealtimeSession(
                 )
 
     def push_video(self, frame: rtc.VideoFrame) -> None:
-        """Reject video input with a warning.
+        """Send a camera frame to Qwen-Omni, or ignore it for Audio models.
 
         Args:
-            frame (rtc.VideoFrame): Ignored frame. Qwen Audio 3.0 Realtime is an
-                audio/text model and does not accept image or video events.
+            frame (rtc.VideoFrame): LiveKit video frame. Omni sessions encode it
+                as JPEG and send ``input_image_buffer.append`` at most once per
+                second. Qwen requires at least one audio append before the first
+                image. Audio models log a warning and drop the frame.
         """
-        logger.warning("Qwen Audio Realtime does not support video input")
+        if not _is_omni_model(self._opts.model):
+            logger.warning("Qwen Audio Realtime does not support video input")
+            return
+        if not self._audio_appended:
+            logger.warning(
+                "Qwen Omni Realtime requires audio before the first image"
+            )
+            return
+        now = time.monotonic()
+        if now - self._last_image_at < _OMNI_IMAGE_INTERVAL_S:
+            return
+        image = _encode_omni_jpeg(frame)
+        self._last_image_at = now
+        self.send_event(
+            {
+                "type": "input_image_buffer.append",
+                "image": base64.b64encode(image).decode("ascii"),
+            }
+        )
 
     def commit_audio(self) -> None:
         """Flush and commit buffered audio in manual push-to-talk mode.
@@ -931,6 +1015,7 @@ class RealtimeSession(
         active. Call :meth:`generate_reply` after committing in manual mode.
         """
         for chunk in self._audio_stream.flush():
+            self._audio_appended = True
             self.send_event(
                 {
                     "type": "input_audio_buffer.append",
@@ -1597,7 +1682,7 @@ class RealtimeSession(
             turn_detection = self._opts.turn_detection
             is_invalid_smart_turn = (
                 turn_detection is not None
-                and turn_detection.get("type") == "smart_turn"
+                and turn_detection.get("type") in _SMART_TURN_TYPES
                 and event.get("reason") == "turn_invalid"
             )
             self._input_speaking = False
@@ -1960,7 +2045,7 @@ class RealtimeSession(
         input_audio_tokens = int(input_details.get("audio_tokens", 0) or 0)
         output_text_tokens = int(output_details.get("text_tokens", 0) or 0)
         output_audio_tokens = int(output_details.get("audio_tokens", 0) or 0)
-        if usage:
+        if usage and self._opts.model in _REALTIME_TOKEN_PRICES:
             response_cost_cny = _estimate_response_cost_cny(
                 model=self._opts.model,
                 input_text_tokens=input_text_tokens,
@@ -2248,45 +2333,162 @@ def _qwen_item_to_livekit_item(item: dict[str, Any]) -> llm.ChatItem:
     raise ValueError(f"unsupported Qwen conversation item type: {item_type}")
 
 
-def _validate_model_and_voice(model: str, voice: str) -> None:
-    """Validate public model/voice values and cloned-voice model affinity.
+_AUDIO_MODELS = {
+    "qwen-audio-3.1-realtime-plus",
+    "qwen-audio-3.1-realtime-flash",
+    "qwen-audio-3.0-realtime-plus",
+    "qwen-audio-3.0-realtime-flash",
+}
+_OMNI_MODELS = {
+    "qwen3.8-omni-flash-realtime",
+    "qwen3.5-omni-plus-realtime",
+    "qwen3.5-omni-flash-realtime",
+}
+_AUDIO_VOICES_30 = {
+    "longanqian",
+    "longanlingxin",
+    "longanlingxi",
+    "longanxiaoxin",
+    "longanlufeng",
+}
 
-    3.1 and 3.0 system voices are not interchangeable: DashScope rejects a
-    3.0 voice id on a 3.1 model (and vice versa) with InvalidParameter, so
-    each model family only accepts its own voice naming. The 3.1 system set
-    is the union of the qwen-audio-3.1-tts voice lists and grows over time,
-    therefore any ``*_v3.1`` id (or small-language
-    ``qwen-audio-3.1-tts-<locale>-<name>`` id) is accepted as a system voice.
-    """
-    supported_models = {
-        "qwen-audio-3.1-realtime-plus",
-        "qwen-audio-3.1-realtime-flash",
-        "qwen-audio-3.0-realtime-plus",
-        "qwen-audio-3.0-realtime-flash",
-    }
-    system_voices_30 = {
-        "longanqian",
-        "longanlingxin",
-        "longanlingxi",
-        "longanxiaoxin",
-        "longanlufeng",
-    }
-    if model not in supported_models:
-        choices = ", ".join(sorted(supported_models))
-        raise ValueError(
-            f"unsupported Qwen Audio Realtime model {model!r}; use {choices}"
+
+def _is_omni_model(model: str) -> bool:
+    """Return whether ``model`` uses the Qwen-Omni Realtime protocol."""
+    return model in _OMNI_MODELS
+
+
+def _resolve_voice(model: str, voice: NotGivenOr[str]) -> str:
+    """Return the voice for ``model``, applying each family's default."""
+    _require_supported_model(model)
+    if _is_omni_model(model):
+        resolved = DEFAULT_OMNI_VOICE if not is_given(voice) else voice
+        if not isinstance(resolved, str) or not resolved.strip():
+            raise ValueError("Qwen Omni voice must be a non-empty string")
+        return resolved
+    if not is_given(voice):
+        resolved = (
+            DEFAULT_AUDIO_31_VOICE
+            if model.startswith("qwen-audio-3.1-")
+            else DEFAULT_VOICE
         )
+    else:
+        resolved = voice
+    _validate_audio_voice(model, resolved)
+    return resolved
+
+
+def _resolve_turn_detection(
+    model: str, turn_detection: NotGivenOr[TurnDetection]
+) -> TurnDetection:
+    """Return turn detection for ``model``, rejecting Omni ``smart_turn``."""
+    if not is_given(turn_detection):
+        default = (
+            DEFAULT_OMNI_TURN_DETECTION
+            if _is_omni_model(model)
+            else DEFAULT_TURN_DETECTION
+        )
+        return copy.deepcopy(default)
+    resolved = copy.deepcopy(turn_detection)
+    if (
+        _is_omni_model(model)
+        and resolved is not None
+        and resolved.get("type") in _SMART_TURN_TYPES
+    ):
+        raise ValueError(
+            "Qwen Omni Realtime does not support smart_turn or smart_turn_v2; "
+            "use server_vad, semantic_vad, semantic_vad_ec, or None"
+        )
+    return resolved
+
+
+def _require_supported_model(model: str) -> None:
+    if model in _AUDIO_MODELS or model in _OMNI_MODELS:
+        return
+    choices = ", ".join(sorted(_AUDIO_MODELS | _OMNI_MODELS))
+    raise ValueError(f"unsupported Qwen Audio Realtime model {model!r}; use {choices}")
+
+
+def _validate_audio_voice(model: str, voice: str) -> None:
+    """Validate an Audio-series voice against its model generation.
+
+    3.1 and 3.0 system voices are not interchangeable. The 3.1 system set
+    grows over time, so any ``*_v3.1`` id or
+    ``qwen-audio-3.1-tts-<locale>-<name>`` id is accepted.
+    """
     if model.startswith("qwen-audio-3.1-"):
         if voice.endswith("_v3.1") or voice.startswith("qwen-audio-3.1-tts-"):
             return
-    elif voice in system_voices_30:
+    elif voice in _AUDIO_VOICES_30:
         return
-    if not voice.startswith(f"{model}-"):
-        raise ValueError(
-            f"unsupported voice {voice!r} for model {model!r}; use a built-in "
-            f"SystemVoice of the same model generation or a ClonedVoiceId "
-            f"created with target_model={model!r}"
-        )
+    if voice.startswith(f"{model}-"):
+        return
+    raise ValueError(
+        f"unsupported voice {voice!r} for model {model!r}; use a built-in "
+        f"SystemVoice of the same model generation or a ClonedVoiceId "
+        f"created with target_model={model!r}"
+    )
+
+
+def _omni_audio_config(voice: str) -> dict[str, Any]:
+    """Build the nested audio block required by current Qwen-Omni sessions."""
+    return {
+        "input": {
+            "format": {
+                "type": "pcm",
+                "sample_rate": INPUT_SAMPLE_RATE,
+                "sample_format": "s16le",
+                "channels": 1,
+                "packing": "interleaved",
+                "channel_layout": "mono",
+            }
+        },
+        "output": {
+            "voice": voice,
+            "format": {"type": "pcm", "sample_rate": OUTPUT_SAMPLE_RATE},
+        },
+    }
+
+
+def _even_edge(value: int) -> int:
+    return max(2, value // 2 * 2)
+
+
+def _encode_mjpeg(frame: av.VideoFrame, qscale: int) -> bytes:
+    codec = av.CodecContext.create("mjpeg", "w")
+    codec.width = frame.width
+    codec.height = frame.height
+    codec.pix_fmt = "yuvj420p"
+    codec.options = {"qscale": str(qscale)}
+    packets = list(codec.encode(frame)) + list(codec.encode(None))
+    return b"".join(bytes(packet) for packet in packets)
+
+
+def _encode_omni_jpeg(frame: rtc.VideoFrame) -> bytes:
+    """Encode a LiveKit frame as a JPEG small enough for Qwen-Omni."""
+    source = frame
+    if frame.type != rtc.VideoBufferType.RGB24:
+        source = frame.convert(rtc.VideoBufferType.RGB24)
+    pixels = np.frombuffer(source.data, dtype=np.uint8)
+    array = pixels.reshape(source.height, source.width, 3).copy()
+    video = av.VideoFrame.from_ndarray(array, format="rgb24")
+    scale = min(1.0, _OMNI_MAX_IMAGE_EDGE / max(video.width, video.height))
+    width = _even_edge(int(video.width * scale))
+    height = _even_edge(int(video.height * scale))
+    yuv = video.reformat(format="yuvj420p", width=width, height=height)
+    encoded = _encode_mjpeg(yuv, 8)
+    if len(encoded) <= _OMNI_MAX_JPEG_BYTES:
+        return encoded
+    for qscale in (15, 31):
+        encoded = _encode_mjpeg(yuv, qscale)
+        if len(encoded) <= _OMNI_MAX_JPEG_BYTES:
+            return encoded
+    smaller = video.reformat(
+        format="yuvj420p",
+        width=_even_edge(width // 2),
+        height=_even_edge(height // 2),
+    )
+    return _encode_mjpeg(smaller, 31)
 
 
 __all__ = [
@@ -2294,6 +2496,7 @@ __all__ = [
     "Modalities",
     "RealtimeModelName",
     "Region",
+    "SemanticVadOptions",
     "ServerVadOptions",
     "SmartTurnOptions",
     "SystemVoice",

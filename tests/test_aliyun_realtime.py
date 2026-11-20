@@ -178,6 +178,33 @@ def test_model_accepts_3_1_system_voices(model: str, voice: str) -> None:
     assert realtime_model._opts.voice == voice
 
 
+@pytest.mark.parametrize(
+    "model",
+    ["qwen-audio-3.1-realtime-plus", "qwen-audio-3.1-realtime-flash"],
+)
+def test_audio_31_defaults_to_v31_voice_and_server_vad(model: str) -> None:
+    realtime_model = RealtimeModel(api_key="test", model=model)  # type: ignore[arg-type]
+
+    assert realtime_model._opts.voice == "longanqian_v3.1"
+    assert realtime_model._opts.turn_detection == {"type": "server_vad"}
+
+
+def test_audio_30_defaults_to_server_vad() -> None:
+    model = RealtimeModel(api_key="test")
+
+    assert model._opts.voice == "longanqian"
+    assert model._opts.turn_detection == {"type": "server_vad"}
+
+
+def test_omni_model_rejects_smart_turn_v2() -> None:
+    with pytest.raises(ValueError, match="smart_turn_v2"):
+        RealtimeModel(
+            api_key="test",
+            model="qwen3.5-omni-flash-realtime",
+            turn_detection={"type": "smart_turn_v2"},
+        )
+
+
 def test_model_rejects_3_0_voice_on_3_1_model() -> None:
     with pytest.raises(ValueError, match="same model generation"):
         RealtimeModel(
@@ -194,6 +221,109 @@ def test_model_rejects_3_1_voice_on_3_0_model() -> None:
             model="qwen-audio-3.0-realtime-plus",
             voice="longanqian_v3.1",  # type: ignore[arg-type]
         )
+
+
+def test_omni_model_defaults_to_tina_and_server_vad() -> None:
+    model = RealtimeModel(api_key="test", model="qwen3.5-omni-flash-realtime")
+
+    assert model._opts.voice == "Tina"
+    assert model._opts.turn_detection == {"type": "server_vad"}
+
+
+@pytest.mark.asyncio
+async def test_omni_session_update_uses_nested_audio_config() -> None:
+    model = RealtimeModel(
+        api_key="test",
+        model="qwen3.8-omni-flash-realtime",
+        voice="longanlingxin",
+        workspace_id="ws-id",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+
+    event = session._create_session_update_event()
+
+    assert event["session"]["audio"]["output"]["voice"] == "longanlingxin"
+    assert event["session"]["audio"]["input"]["format"]["sample_rate"] == 16000
+    assert event["session"]["audio"]["output"]["format"]["sample_rate"] == 24000
+    assert "voice" not in event["session"]
+    assert "max_history_turns" not in event["session"]
+    assert event["session"]["turn_detection"]["type"] == "server_vad"
+
+    await session.aclose()
+    await model.aclose()
+
+
+def test_omni_model_rejects_smart_turn() -> None:
+    with pytest.raises(ValueError, match="smart_turn"):
+        RealtimeModel(
+            api_key="test",
+            model="qwen3.5-omni-plus-realtime",
+            turn_detection={"type": "smart_turn"},
+        )
+
+
+def test_audio_model_rejects_omni_voice() -> None:
+    with pytest.raises(ValueError, match="unsupported voice"):
+        RealtimeModel(api_key="test", voice="Tina")
+
+
+@pytest.mark.asyncio
+async def test_omni_video_requires_audio_and_is_throttled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from livekit import rtc
+
+    model = RealtimeModel(
+        api_key="test",
+        model="qwen3.5-omni-flash-realtime",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    sent: list[dict] = []
+    monkeypatch.setattr(session, "send_event", sent.append)
+    frame = rtc.VideoFrame(
+        64,
+        64,
+        rtc.VideoBufferType.RGB24,
+        bytes(64 * 64 * 3),
+    )
+
+    session.push_video(frame)
+    assert sent == []
+
+    session._audio_appended = True
+    session.push_video(frame)
+    session.push_video(frame)
+
+    assert len(sent) == 1
+    assert sent[0]["type"] == "input_image_buffer.append"
+    assert base64.b64decode(sent[0]["image"]).startswith(b"\xff\xd8")
+
+    await session.aclose()
+    await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_audio_model_ignores_video(monkeypatch: pytest.MonkeyPatch) -> None:
+    from livekit import rtc
+
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+    )
+    session = model.session()
+    sent: list[dict] = []
+    monkeypatch.setattr(session, "send_event", sent.append)
+    session._audio_appended = True
+    session.push_video(
+        rtc.VideoFrame(16, 16, rtc.VideoBufferType.RGB24, bytes(16 * 16 * 3))
+    )
+
+    assert sent == []
+
+    await session.aclose()
+    await model.aclose()
 
 
 @pytest.mark.parametrize(
@@ -550,6 +680,7 @@ async def test_websocket_close_logs_code_reason_and_retry_context(
 async def test_smart_turn_marks_invalid_stopped_turns_as_not_transcribed() -> None:
     model = RealtimeModel(
         api_key="test",
+        turn_detection={"type": "smart_turn"},
         http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
     )
     session = model.session()
@@ -742,6 +873,7 @@ async def test_response_create_waits_for_valid_smart_turn_response_done() -> Non
     ws = _FakeWebSocket()
     model = RealtimeModel(
         api_key="test",
+        turn_detection={"type": "smart_turn"},
         http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
     )
     session = model.session()
@@ -795,6 +927,7 @@ async def test_invalid_smart_turn_releases_queued_response_create() -> None:
     ws = _FakeWebSocket()
     model = RealtimeModel(
         api_key="test",
+        turn_detection={"type": "smart_turn"},
         http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
     )
     session = model.session()
@@ -895,6 +1028,7 @@ async def test_response_create_timeout_starts_only_after_dispatch(
     ws = _FakeWebSocket()
     model = RealtimeModel(
         api_key="test",
+        turn_detection={"type": "smart_turn"},
         http_session=_FakeHTTPSession(ws),  # type: ignore[arg-type]
     )
     session = model.session()

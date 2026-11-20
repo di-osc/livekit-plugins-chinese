@@ -11,7 +11,7 @@ const plugins = [
         name: '阿里云',
         href: '/plugins/aliyun',
         accent: 'cyan',
-        capabilities: ['Paraformer', 'CosyVoice', 'Qwen', 'Qwen Audio 3.0'],
+        capabilities: ['Paraformer', 'CosyVoice', 'Qwen', 'Qwen Audio / Omni'],
     },
     {
         name: '火山引擎',
