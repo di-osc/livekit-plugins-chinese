@@ -9,9 +9,8 @@
 
 ### ✨ 新增
 
-- 阿里云 Qwen Audio Realtime，支持 3.0 与 3.1。Audio 与 Omni 默认轮次检测都是 `server_vad`
-- 阿里云 Qwen-Omni Realtime，支持语音以及图片、视频输入
-- 基于 GitHub Pages 的[在线插件文档](https://di-osc.github.io/livekit-plugins-chinese/)
+- 阿里云 Qwen Audio Realtime，支持 3.0 与 3.1。
+- 阿里云 Qwen Omni Realtime，支持语音以及图片、视频输入。
 
 ### 📦 支持调整
 
@@ -22,10 +21,7 @@
 - 腾讯
 - 讯飞
 - 智谱
-
-### 🗑 移除
-
-- 移除阶跃星辰插件 `livekit-plugins-stepfun` 及其文档。端到端实时语音请改用阿里云 Qwen Audio / Omni，或火山引擎豆包 Realtime。
+- 阶跃星辰（建议迁移至 LiveKit 官方插件）
 
 </details>
 
