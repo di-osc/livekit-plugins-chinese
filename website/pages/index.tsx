@@ -20,12 +20,6 @@ const plugins = [
         capabilities: ['豆包 ASR', 'Seed TTS', '豆包 Seed', '豆包 O / SC'],
     },
     {
-        name: '阶跃星辰',
-        href: '/plugins/stepfun',
-        accent: 'blue',
-        capabilities: [null, null, null, 'Step Audio 2.5'],
-    },
-    {
         name: 'Dify',
         href: '/plugins/dify',
         accent: 'green',
@@ -56,7 +50,7 @@ export default function Home() {
                         LIVEKIT PLUGIN ECOSYSTEM
                     </div>
                     <h1>中文模型能力矩阵</h1>
-                    <p>五个插件，覆盖语音识别、语音合成、文本模型与端到端实时语音。</p>
+                    <p>四个插件，覆盖语音识别、语音合成、文本模型与端到端实时语音。</p>
                 </header>
 
                 <section

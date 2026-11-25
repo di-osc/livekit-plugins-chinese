@@ -23,6 +23,10 @@
 - 讯飞
 - 智谱
 
+### 🗑 移除
+
+- 移除阶跃星辰插件 `livekit-plugins-stepfun` 及其文档。端到端实时语音请改用阿里云 Qwen Audio / Omni，或火山引擎豆包 Realtime。
+
 </details>
 
 ## 环境变量
@@ -45,6 +49,5 @@ uv run examples/volcengine_realtime.py console
 | ---- | --- | --- | --- | --- | --- |
 | 火山引擎 | ✅  | ✅  | ✅  |✅ |[点击这里](livekit-plugins/livekit-plugins-volcengine) |
 | 阿里云 | ✅ | ✅  | ✅ | ✅ |[点击这里](livekit-plugins/livekit-plugins-aliyun) |
-| 阶跃星辰 | ❎ | ❎  | ❎ | ✅ |[点击这里](livekit-plugins/livekit-plugins-stepfun) |
 | Dify | ❎ | ❎  | ✅  | ❎|[点击这里](livekit-plugins/livekit-plugins-dify) |
 | FlashTTS | ❎ | ✅  | ❎ | ❎ |[点击这里](livekit-plugins/livekit-plugins-flashtts) |

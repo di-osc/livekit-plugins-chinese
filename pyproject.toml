@@ -14,7 +14,6 @@ livekit-plugins-volcengine = { workspace = true }
 livekit-plugins-dify = { workspace = true}
 livekit-plugins-flashtts = { workspace = true}
 livekit-plugins-aliyun = { workspace = true}
-livekit-plugins-stepfun = { workspace = true}
 
 [tool.uv.workspace]
 members = ["livekit-plugins/*"]

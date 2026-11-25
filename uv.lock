@@ -15,7 +15,6 @@ members = [
     "livekit-plugins-chinese",
     "livekit-plugins-difyai",
     "livekit-plugins-flashtts",
-    "livekit-plugins-stepfun",
     "livekit-plugins-volcengine",
 ]
 constraints = [{ name = "livekit-agents", specifier = "==1.8.13", index = "https://pypi.org/simple" }]
@@ -1594,20 +1593,6 @@ dependencies = [
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/80/84/0d03483dd9498d11db9ba49ccc670782c5e97a85fc096bd4e22f61085dd4/livekit_plugins_silero-1.2.9.tar.gz", hash = "sha256:2458516b43ac9965e0b2237382425b9f037f59f63b6668e8a18c2678adcad57e" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/12/fd/ff2bb4d605551ca36528feeeabad073202ff8d934afe08e40b9626cda3a1/livekit_plugins_silero-1.2.9-py3-none-any.whl", hash = "sha256:e6410c760e8eeb15a8b2f02dae43a97e73bfb1d0e2b819316c907f0da727a959" },
-]
-
-[[package]]
-name = "livekit-plugins-stepfun"
-source = { editable = "livekit-plugins/livekit-plugins-stepfun" }
-dependencies = [
-    { name = "livekit-agents" },
-    { name = "openai" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "livekit-agents", specifier = ">=1.8.13,<1.9", index = "https://pypi.org/simple" },
-    { name = "openai", specifier = ">=1.75.0" },
 ]
 
 [[package]]

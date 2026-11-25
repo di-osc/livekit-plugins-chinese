@@ -97,7 +97,7 @@ describe('LiveKit Chinese plugin documentation', () => {
     })
 
     test('documents every maintained plugin and its credential source', () => {
-        const expectedPages = ['aliyun', 'volcengine', 'stepfun', 'dify', 'flashtts']
+        const expectedPages = ['aliyun', 'volcengine', 'dify', 'flashtts']
         const credentials = read('docs/getting-started/credentials.mdx')
 
         for (const plugin of expectedPages) {
@@ -105,7 +105,6 @@ describe('LiveKit Chinese plugin documentation', () => {
         }
         expect(credentials).toContain('DASHSCOPE_API_KEY')
         expect(credentials).toContain('VOLCENGINE_REALTIME_ACCESS_TOKEN')
-        expect(credentials).toContain('STEPFUN_REALTIME_API_KEY')
         expect(credentials).toContain('DIFY_API_KEY')
         expect(credentials).toContain('FLASHTTS_BASE_URL')
     })
