@@ -75,13 +75,15 @@ TypeError: 'types.UnionType' object is not callable
 # 错误
 aliyun.realtime.TurnDetection(...)
 
-# 正确
-aliyun.ServerVadOptions(type="server_vad")
-aliyun.SmartTurnOptions(type="smart_turn_v2")
-aliyun.SemanticVadOptions(type="semantic_vad")
+# Qwen Audio
+aliyun.QwenAudioTurnDetection.server_vad()
+aliyun.QwenAudioTurnDetection.smart_turn_v2()
+
+# Qwen-Omni
+aliyun.QwenOmniTurnDetection.semantic_vad()
 ```
 
-也可以直接传字典或 `None`。
+也可以直接传带 `type` 的字典，或传 `None` 使用手动模式。
 
 ## 工具回复重复 {id="duplicate"}
 

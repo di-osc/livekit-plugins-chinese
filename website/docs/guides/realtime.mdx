@@ -67,19 +67,22 @@ server-side turn detection enabled, ignoring the turn_detection setting
 这是配置提示，不是故障。应在 Realtime 模型本身配置：
 
 ```python
-aliyun.RealtimeModel(
-    turn_detection={"type": "server_vad"},
+aliyun.QwenAudioRealtime(
+    turn_detection=aliyun.QwenAudioTurnDetection.server_vad(),
 )
 ```
 
-不要写 `aliyun.realtime.TurnDetection(...)`。`TurnDetection` 是类型联合，不是可
-实例化的类，所以那样会触发 `TypeError: 'types.UnionType' object is not callable`。
+Qwen-Omni 使用 `QwenOmniTurnDetection.server_vad()` 或 `semantic_vad()`。不要写
+`aliyun.realtime.TurnDetection(...)`。`TurnDetection` 是类型联合，不是可实例化的类，
+所以那样会触发 `TypeError: 'types.UnionType' object is not callable`。
 
 ## Smart Turn {id="smart-turn"}
 
 Qwen Audio 与 Qwen-Omni 的默认轮次检测都是 `server_vad`。`smart_turn` 和
-`smart_turn_v2` 只在显式传入时用于 Qwen Audio；3.1 更适合 `smart_turn_v2`。
-Qwen-Omni 不接受这两种类型，语义轮次使用 `semantic_vad` 或 `semantic_vad_ec`。
+`smart_turn_v2` 只用于 Qwen Audio，通过 `QwenAudioTurnDetection.smart_turn()` 或
+`smart_turn_v2()` 传入；3.1 更适合 `smart_turn_v2`。Qwen-Omni 不接受这两种类型，
+语义轮次使用 `QwenOmniTurnDetection.semantic_vad()`。`semantic_vad_ec()` 只接受
+`qwen3.8-omni-flash-realtime`。
 
 Qwen Audio 的 smart turn 同时使用声学和语义判断：
 

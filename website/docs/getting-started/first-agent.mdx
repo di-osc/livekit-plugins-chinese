@@ -75,18 +75,18 @@ python agent.py dev
 
 ## 改为 Realtime {id="realtime"}
 
-Realtime 模型自身完成听、理解和说，只把一个 `RealtimeModel` 传给 `llm`：
+Realtime 模型自身完成听、理解和说。Qwen Audio 把 `QwenAudioRealtime` 传给 `llm`：
 
 ```python
 session = AgentSession(
-    llm=aliyun.RealtimeModel(
+    llm=aliyun.QwenAudioRealtime(
         model="qwen-audio-3.1-realtime-plus",
         voice="longanqian_v3.1",
     )
 )
 ```
 
-不传 `turn_detection` 时默认是 `server_vad`。需要摄像头时改用 Qwen-Omni，并打开
+不传 `turn_detection` 时默认是 `server_vad`。需要摄像头时改用 `QwenOmniRealtime`，并打开
 `room_io.RoomOptions(video_input=True)`。Realtime 模式不需要再配置独立的 STT 与
 TTS。详细的音色、轮次检测、开场语和工具调用行为见[阿里云插件](/plugins/aliyun)与
 [Realtime 会话](/guides/realtime)。

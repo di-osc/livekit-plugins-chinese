@@ -16,6 +16,10 @@ from livekit.plugins.aliyun import realtime as aliyun_realtime
 from livekit.plugins.aliyun.realtime import (
     ClonedVoiceId,
     DEFAULT_MODEL,
+    QwenAudioRealtime,
+    QwenAudioTurnDetection,
+    QwenOmniRealtime,
+    QwenOmniTurnDetection,
     RealtimeModel,
     RealtimeSession,
     _build_say_instruction,
@@ -23,6 +27,10 @@ from livekit.plugins.aliyun.realtime import (
     _livekit_item_to_qwen_item,
     _process_base_url,
     _qwen_item_to_livekit_item,
+)
+
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:aliyun.RealtimeModel is deprecated:DeprecationWarning"
 )
 
 
@@ -1024,7 +1032,9 @@ async def test_user_speaking_response_create_error_is_requeued() -> None:
 async def test_response_create_timeout_starts_only_after_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(aliyun_realtime, "_RESPONSE_CREATE_TIMEOUT", 0.01)
+    monkeypatch.setattr(
+        aliyun_realtime._base, "_RESPONSE_CREATE_TIMEOUT", 0.01
+    )
     ws = _FakeWebSocket()
     model = RealtimeModel(
         api_key="test",
@@ -1243,3 +1253,81 @@ async def test_tools_use_qwen_function_schema() -> None:
 
     await session.aclose()
     await model.aclose()
+
+
+def test_realtime_model_warns_that_it_will_be_removed() -> None:
+    with pytest.warns(DeprecationWarning, match="will be removed"):
+        model = RealtimeModel(api_key="test")
+
+    assert model.model == DEFAULT_MODEL
+    assert model._opts.voice == "longanqian"
+
+
+def test_turn_detection_builders_match_each_model() -> None:
+    audio = QwenAudioRealtime(
+        api_key="test",
+        turn_detection=QwenAudioTurnDetection.smart_turn_v2(threshold=0.2),
+    )
+    omni = QwenOmniRealtime(
+        api_key="test",
+        model="qwen3.8-omni-flash-realtime",
+        workspace_id="ws-id",
+        turn_detection=QwenOmniTurnDetection.semantic_vad_ec(silence_duration_ms=400),
+    )
+    omni_35 = QwenOmniRealtime(
+        api_key="test",
+        turn_detection=QwenOmniTurnDetection.server_vad(idle_timeout_ms=8000),
+    )
+
+    assert audio._opts.turn_detection == {"type": "smart_turn_v2", "threshold": 0.2}
+    assert omni._opts.turn_detection == {
+        "type": "semantic_vad_ec",
+        "threshold": 0.5,
+        "silence_duration_ms": 400,
+    }
+    assert omni_35._opts.turn_detection == {
+        "type": "server_vad",
+        "threshold": 0.5,
+        "silence_duration_ms": 800,
+        "idle_timeout_ms": 8000,
+    }
+
+    with pytest.raises(ValueError, match="server_vad, smart_turn"):
+        QwenAudioRealtime(
+            api_key="test",
+            turn_detection={"type": "semantic_vad"},  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="qwen3.8-omni-flash-realtime"):
+        QwenOmniRealtime(
+            api_key="test",
+            turn_detection=QwenOmniTurnDetection.semantic_vad_ec(),
+        )
+    with pytest.raises(ValueError, match="idle_timeout_ms"):
+        QwenOmniRealtime(
+            api_key="test",
+            model="qwen3.8-omni-flash-realtime",
+            workspace_id="ws-id",
+            turn_detection=QwenOmniTurnDetection.server_vad(idle_timeout_ms=8000),
+        )
+
+
+def test_qwen_audio_realtime_rejects_omni_model() -> None:
+    with pytest.raises(ValueError, match="unsupported Qwen Audio Realtime model"):
+        QwenAudioRealtime(
+            api_key="test",
+            model="qwen3.5-omni-flash-realtime",  # type: ignore[arg-type]
+        )
+
+
+def test_qwen_omni_realtime_defaults_and_rejects_audio_model() -> None:
+    model = QwenOmniRealtime(api_key="test")
+
+    assert model.model == "qwen3.5-omni-flash-realtime"
+    assert model._opts.voice == "Tina"
+    assert "max_history_turns" not in model._family.session_fields(model._opts)
+
+    with pytest.raises(ValueError, match="unsupported Qwen Audio Realtime model"):
+        QwenOmniRealtime(
+            api_key="test",
+            model="qwen-audio-3.0-realtime-plus",  # type: ignore[arg-type]
+        )

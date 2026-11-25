@@ -16,9 +16,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         raise RuntimeError("请先设置 DASHSCOPE_API_KEY")
 
     session = AgentSession(
-        llm=aliyun.RealtimeModel(
+        llm=aliyun.QwenAudioRealtime(
             model="qwen-audio-3.1-realtime-plus",
             voice="longanqian_v3.1",
+            # server_vad、smart_turn、smart_turn_v2；None 为手动模式。
+            turn_detection=aliyun.QwenAudioTurnDetection.smart_turn_v2(),
         )
     )
 
