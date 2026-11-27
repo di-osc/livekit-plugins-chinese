@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import copy
 import time
 from typing import Any, Literal, cast
@@ -359,20 +358,20 @@ class _QwenOmniFamily(_RealtimeFamily):
         return {}
 
     def push_video(self, session: RealtimeSession, frame: rtc.VideoFrame) -> None:
-        if not session._audio_appended:
-            logger.warning("Qwen Omni Realtime requires audio before the first image")
-            return
         now = time.monotonic()
         if now - session._last_image_at < _OMNI_IMAGE_INTERVAL_S:
             return
+        if session._opts.turn_detection is None:
+            image = _encode_omni_jpeg(frame)
+            session._last_image_at = now
+            session._hold_manual_image(image)
+            return
+        if not session._audio_appended:
+            logger.warning("Qwen Omni Realtime requires audio before the first image")
+            return
         image = _encode_omni_jpeg(frame)
         session._last_image_at = now
-        session.send_event(
-            {
-                "type": "input_image_buffer.append",
-                "image": base64.b64encode(image).decode("ascii"),
-            }
-        )
+        session._emit_input_image(image)
 
     def check_endpoint(self, model: str, base_url: str) -> None:
         if model == "qwen3.8-omni-flash-realtime" and base_url == DEFAULT_BASE_URL:

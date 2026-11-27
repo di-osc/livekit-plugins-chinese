@@ -36,6 +36,37 @@ INPUT_SAMPLE_RATE: int = 16000
 # Qwen Audio returns 16-bit, mono PCM at 24 kHz.
 OUTPUT_SAMPLE_RATE: int = 24000
 NUM_CHANNELS: Literal[1] = 1
+_PCM16_BYTES: int = 2
+# Qwen rejects manual-mode audio once the uncommitted buffer reaches 30 seconds.
+_MANUAL_AUDIO_LIMIT_S: float = 30.0
+# Speech-start arrives after the onset frames have already passed through push_audio.
+_MANUAL_PREROLL_S: float = 0.3
+# Qwen returns an error when commit is sent with an empty or near-empty buffer.
+_MIN_COMMIT_AUDIO_S: float = 0.1
+_MANUAL_IMAGE_LIMIT: int = 30
+
+
+def _pcm_bytes(seconds: float) -> int:
+    return int(seconds * INPUT_SAMPLE_RATE) * _PCM16_BYTES * NUM_CHANNELS
+
+
+def _trim_pcm_front(buf: bytearray, max_bytes: int) -> None:
+    extra = len(buf) - max_bytes
+    if extra <= 0:
+        return
+    if extra % _PCM16_BYTES:
+        extra += _PCM16_BYTES - (extra % _PCM16_BYTES)
+    if extra >= len(buf):
+        buf.clear()
+        return
+    del buf[:extra]
+
+
+def _iter_pcm_chunks(pcm: bytes, chunk_bytes: int) -> Iterator[bytes]:
+    for offset in range(0, len(pcm), chunk_bytes):
+        yield pcm[offset : offset + chunk_bytes]
+
+
 DEFAULT_BASE_URL: str = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 DEFAULT_MAX_SESSION_DURATION: int = 20 * 60
 _RESPONSE_CREATE_TIMEOUT: float = 10.0
@@ -747,11 +778,19 @@ class RealtimeSession(
         self._instructions: str | None = None
         self._msg_ch: utils.aio.Chan[dict[str, Any]] = utils.aio.Chan()
         self._input_resampler: rtc.AudioResampler | None = None
-        self._audio_stream: utils.audio.AudioByteStream = utils.audio.AudioByteStream(
-            INPUT_SAMPLE_RATE,
-            NUM_CHANNELS,
-            samples_per_channel=INPUT_SAMPLE_RATE // 10,
-        )
+        self._audio_stream = self._new_input_audio_stream()
+        self._manual_pre_roll = bytearray()
+        """Recent PCM kept until a VAD speech start copies it into the ring."""
+        self._manual_ring = bytearray()
+        """Uncommitted manual-mode PCM. Nothing here has been sent to Qwen."""
+        self._manual_speech_open = False
+        """Whether VAD currently considers the user to be speaking."""
+        self._manual_speech_started = False
+        """Whether this uncommitted turn has received a VAD speech start."""
+        self._server_audio_uncommitted = False
+        """Whether Qwen's input buffer holds audio appended since the last commit."""
+        self._pending_images: list[bytes] = []
+        """JPEG frames held until the next manual-mode commit."""
         self._current_generation: _ResponseGeneration | None = None
         self._cancelled_response_ids: set[str] = set()
         self._estimated_cost_cny: float = 0.0
@@ -864,6 +903,8 @@ class RealtimeSession(
             )
             self._opts.turn_detection = resolved_turn_detection
             changes["turn_detection"] = copy.deepcopy(resolved_turn_detection)
+            self._reset_manual_capture()
+            self._audio_stream = self._new_input_audio_stream()
         if is_given(tool_choice):
             self._opts.tool_choice = tool_choice
             if tool_choice not in (None, "auto"):
@@ -982,6 +1023,35 @@ class RealtimeSession(
             previous_item_id = item.id
         return events
 
+    def mark_speech_started(self) -> None:
+        """Begin a manual-mode capture after the VAD reports speech start.
+
+        LiveKit does not deliver Silero's ``START_OF_SPEECH`` to the realtime
+        session, so the application forwards that event here. The short pre-roll
+        is copied into the local ring. Audio stays local until
+        :meth:`commit_audio`.
+
+        Calls are ignored when Qwen's own turn detection is enabled.
+        """
+        if not self._manual_mode():
+            return
+        self._manual_speech_open = True
+        self._manual_speech_started = True
+        if self._manual_pre_roll:
+            self._append_manual_ring(self._manual_pre_roll)
+            self._manual_pre_roll.clear()
+
+    def mark_speech_stopped(self) -> None:
+        """Stop adding audio after the VAD reports speech end.
+
+        Audio already in the ring is kept for :meth:`commit_audio`. A later
+        speech start in the same turn appends to that ring. Calls are ignored
+        when Qwen's own turn detection is enabled.
+        """
+        if not self._manual_mode():
+            return
+        self._manual_speech_open = False
+
     def push_audio(self, frame: rtc.AudioFrame) -> None:
         """Append an audio frame to Qwen's input buffer.
 
@@ -989,16 +1059,21 @@ class RealtimeSession(
             frame (rtc.AudioFrame): PCM audio at any LiveKit-supported sample
                 rate. It is resampled to 16 kHz mono PCM16 and packetized into
                 approximately 100 ms chunks before Base64 encoding.
+
+        In manual mode the frame is not sent. It enters the local ring only
+        after :meth:`mark_speech_started`, and only the most recent 30 seconds
+        are kept. Before speech start, a 300 ms pre-roll is retained locally.
         """
         for resampled in self._resample_audio(frame):
-            for chunk in self._audio_stream.write(resampled.data.tobytes()):
-                self._audio_appended = True
-                self.send_event(
-                    {
-                        "type": "input_audio_buffer.append",
-                        "audio": base64.b64encode(chunk.data).decode("ascii"),
-                    }
-                )
+            pcm = resampled.data.tobytes()
+            if self._manual_mode():
+                if self._manual_speech_open:
+                    self._append_manual_ring(pcm)
+                else:
+                    self._append_manual_preroll(pcm)
+                continue
+            for chunk in self._audio_stream.write(pcm):
+                self._emit_input_audio(chunk.data.tobytes())
 
     def push_video(self, frame: rtc.VideoFrame) -> None:
         """Send a camera frame when the model family accepts video input.
@@ -1016,24 +1091,52 @@ class RealtimeSession(
 
         This event is ignored by Qwen when ``server_vad`` or ``smart_turn`` is
         active. Call :meth:`generate_reply` after committing in manual mode.
+
+        Manual mode uploads the local ring, at most 30 seconds, and then
+        commits it. Held Qwen-Omni images are sent after that audio and before
+        the commit. Audio shorter than 100 ms is dropped instead of committed.
+
+        Raises:
+            llm.RealtimeError: Manual mode was committed before any VAD speech
+                start was reported via :meth:`mark_speech_started`.
         """
-        for chunk in self._audio_stream.flush():
-            self._audio_appended = True
-            self.send_event(
-                {
-                    "type": "input_audio_buffer.append",
-                    "audio": base64.b64encode(chunk.data).decode("ascii"),
-                }
+        if not self._manual_mode():
+            for chunk in self._audio_stream.flush():
+                self._emit_input_audio(chunk.data.tobytes())
+            self.send_event({"type": "input_audio_buffer.commit"})
+            return
+
+        if not self._manual_speech_started:
+            raise llm.RealtimeError(
+                "manual mode requires a VAD speech start before committing audio"
             )
-        self.send_event({"type": "input_audio_buffer.commit"})
+
+        pcm = bytes(self._manual_ring)
+        images = list(self._pending_images)
+        self._reset_manual_capture()
+        if len(pcm) < _pcm_bytes(_MIN_COMMIT_AUDIO_S):
+            return
+
+        chunk_bytes = (INPUT_SAMPLE_RATE // 10) * _PCM16_BYTES
+        self._server_audio_uncommitted = True
+        try:
+            for chunk in _iter_pcm_chunks(pcm, chunk_bytes):
+                self._emit_input_audio(chunk)
+            for image in images:
+                self._emit_input_image(image)
+            self.send_event({"type": "input_audio_buffer.commit"})
+        finally:
+            self._server_audio_uncommitted = False
 
     def clear_audio(self) -> None:
         """Discard locally and remotely buffered, uncommitted manual-mode audio."""
-        self._audio_stream = utils.audio.AudioByteStream(
-            INPUT_SAMPLE_RATE,
-            NUM_CHANNELS,
-            samples_per_channel=INPUT_SAMPLE_RATE // 10,
-        )
+        server_has_audio = self._server_audio_uncommitted
+        manual = self._manual_mode()
+        self._reset_manual_capture()
+        self._audio_stream = self._new_input_audio_stream()
+        if manual and not server_has_audio:
+            return
+        self._server_audio_uncommitted = False
         self.send_event({"type": "input_audio_buffer.clear"})
 
     def _refresh_response_create_ready(self) -> None:
@@ -1323,6 +1426,54 @@ class RealtimeSession(
         self._server_session_updated.set()
         self._msg_ch.close()
         await self._main_atask
+
+    def _manual_mode(self) -> bool:
+        return self._opts.turn_detection is None
+
+    def _new_input_audio_stream(self) -> utils.audio.AudioByteStream:
+        return utils.audio.AudioByteStream(
+            INPUT_SAMPLE_RATE,
+            NUM_CHANNELS,
+            samples_per_channel=INPUT_SAMPLE_RATE // 10,
+        )
+
+    def _append_manual_preroll(self, pcm: bytes) -> None:
+        self._manual_pre_roll.extend(pcm)
+        _trim_pcm_front(self._manual_pre_roll, _pcm_bytes(_MANUAL_PREROLL_S))
+
+    def _append_manual_ring(self, pcm: bytes | bytearray) -> None:
+        self._manual_ring.extend(pcm)
+        _trim_pcm_front(self._manual_ring, _pcm_bytes(_MANUAL_AUDIO_LIMIT_S))
+
+    def _reset_manual_capture(self) -> None:
+        self._manual_pre_roll.clear()
+        self._manual_ring.clear()
+        self._manual_speech_open = False
+        self._manual_speech_started = False
+        self._pending_images.clear()
+
+    def _hold_manual_image(self, image: bytes) -> None:
+        self._pending_images.append(image)
+        extra = len(self._pending_images) - _MANUAL_IMAGE_LIMIT
+        if extra > 0:
+            del self._pending_images[:extra]
+
+    def _emit_input_audio(self, pcm: bytes) -> None:
+        self._audio_appended = True
+        self.send_event(
+            {
+                "type": "input_audio_buffer.append",
+                "audio": base64.b64encode(pcm).decode("ascii"),
+            }
+        )
+
+    def _emit_input_image(self, image: bytes) -> None:
+        self.send_event(
+            {
+                "type": "input_image_buffer.append",
+                "image": base64.b64encode(image).decode("ascii"),
+            }
+        )
 
     def _resample_audio(self, frame: rtc.AudioFrame) -> Iterator[rtc.AudioFrame]:
         if (

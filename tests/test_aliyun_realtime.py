@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import aiohttp
 import pytest
+from livekit import rtc
 
 from livekit.agents import function_tool, llm
 from livekit.agents.types import APIConnectOptions
@@ -1317,6 +1318,148 @@ def test_qwen_audio_realtime_rejects_omni_model() -> None:
             api_key="test",
             model="qwen3.5-omni-flash-realtime",  # type: ignore[arg-type]
         )
+
+
+def _pcm_tone(value: int, samples: int) -> bytes:
+    return int(value).to_bytes(2, "little", signed=True) * samples
+
+
+def _audio_frame(pcm: bytes) -> rtc.AudioFrame:
+    return rtc.AudioFrame(pcm, 16_000, 1, len(pcm) // 2)
+
+
+def _appended_pcm(events: list[dict]) -> bytes:
+    return b"".join(
+        base64.b64decode(event["audio"])
+        for event in events
+        if event.get("type") == "input_audio_buffer.append"
+    )
+
+
+async def _open_session(**kwargs: object) -> tuple[RealtimeModel, RealtimeSession, list[dict]]:
+    model = RealtimeModel(
+        api_key="test",
+        http_session=_FakeHTTPSession(_FakeWebSocket()),  # type: ignore[arg-type]
+        **kwargs,  # type: ignore[arg-type]
+    )
+    session = model.session()
+    sent: list[dict] = []
+    session.send_event = sent.append  # type: ignore[method-assign]
+    return model, session, sent
+
+
+@pytest.mark.asyncio
+async def test_manual_commit_without_speech_start_errors() -> None:
+    model, session, sent = await _open_session(turn_detection=None)
+    try:
+        session.push_audio(_audio_frame(_pcm_tone(1, 8_000)))
+        with pytest.raises(llm.RealtimeError, match="speech start"):
+            session.commit_audio()
+        assert _appended_pcm(sent) == b""
+        assert not any(event["type"] == "input_audio_buffer.commit" for event in sent)
+    finally:
+        await session.aclose()
+        await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manual_mode_commits_preroll_and_speech_only() -> None:
+    model, session, sent = await _open_session(turn_detection=None)
+    try:
+        session.push_audio(_audio_frame(_pcm_tone(1, 8_000)))
+        session.mark_speech_started()
+        session.push_audio(_audio_frame(_pcm_tone(2, 3_200)))
+        session.mark_speech_stopped()
+        session.push_audio(_audio_frame(_pcm_tone(4, 3_200)))
+        session.commit_audio()
+
+        pcm = _appended_pcm(sent)
+        assert pcm == _pcm_tone(1, 4_800) + _pcm_tone(2, 3_200)
+        assert sent[-1]["type"] == "input_audio_buffer.commit"
+        with pytest.raises(llm.RealtimeError, match="speech start"):
+            session.commit_audio()
+    finally:
+        await session.aclose()
+        await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manual_mode_keeps_only_the_latest_30_seconds() -> None:
+    model, session, sent = await _open_session(turn_detection=None)
+    try:
+        session.mark_speech_started()
+        session.push_audio(_audio_frame(_pcm_tone(1, 16_000)))
+        session.push_audio(_audio_frame(_pcm_tone(2, 30 * 16_000)))
+        session.commit_audio()
+
+        pcm = _appended_pcm(sent)
+        assert pcm == _pcm_tone(2, 30 * 16_000)
+        assert len(pcm) / 32_000 == 30
+    finally:
+        await session.aclose()
+        await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manual_mode_skips_short_commit_and_clear_stays_local() -> None:
+    model, session, sent = await _open_session(turn_detection=None)
+    try:
+        session.mark_speech_started()
+        session.push_audio(_audio_frame(_pcm_tone(1, 800)))
+        session.commit_audio()
+        assert sent == []
+
+        session.mark_speech_started()
+        session.push_audio(_audio_frame(_pcm_tone(1, 3_200)))
+        session.clear_audio()
+        assert sent == []
+        with pytest.raises(llm.RealtimeError, match="speech start"):
+            session.commit_audio()
+    finally:
+        await session.aclose()
+        await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_server_vad_still_appends_every_audio_chunk() -> None:
+    model, session, sent = await _open_session()
+    try:
+        session.push_audio(_audio_frame(_pcm_tone(1, 3_200)))
+        appended = [
+            event for event in sent if event["type"] == "input_audio_buffer.append"
+        ]
+        assert len(appended) == 2
+        session.commit_audio()
+        assert sent[-1]["type"] == "input_audio_buffer.commit"
+    finally:
+        await session.aclose()
+        await model.aclose()
+
+
+@pytest.mark.asyncio
+async def test_manual_omni_images_are_sent_after_audio_on_commit() -> None:
+    model, session, sent = await _open_session(
+        model="qwen3.5-omni-flash-realtime",
+        turn_detection=None,
+    )
+    try:
+        frame = rtc.VideoFrame(64, 64, rtc.VideoBufferType.RGB24, bytes(64 * 64 * 3))
+        session.push_video(frame)
+        assert sent == []
+
+        session.mark_speech_started()
+        session.push_audio(_audio_frame(_pcm_tone(1, 3_200)))
+        session.commit_audio()
+
+        kinds = [event["type"] for event in sent]
+        assert kinds[-2:] == ["input_image_buffer.append", "input_audio_buffer.commit"]
+        assert "input_audio_buffer.append" in kinds
+        assert kinds.index("input_image_buffer.append") > kinds.index(
+            "input_audio_buffer.append"
+        )
+    finally:
+        await session.aclose()
+        await model.aclose()
 
 
 def test_qwen_omni_realtime_defaults_and_rejects_audio_model() -> None:
